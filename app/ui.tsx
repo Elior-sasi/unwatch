@@ -1,0 +1,249 @@
+'use client';
+import {useCallback,useEffect,useId,useMemo,useRef,useState} from 'react';
+import {Play,CalendarClock,Clapperboard,Library,Search,Settings,X,Check,Plus,Minus,Pause,Trash2,Tv,Film,Sparkles,Languages,Captions,Mic,ChevronDown,Ticket,Download,Upload,LogIn,LogOut,RefreshCw,Clock} from 'lucide-react';
+import {after,before,upNext,epLabel,whenText,daysTo,type Up} from '@/lib/progress';
+import {merge,mergeRemoved,type Removed} from '@/lib/library';
+import {KIND_LABEL,STATUS_LABEL,type Detail,type Hit,type Item,type Kind,type Status,type Summary} from '@/lib/types';
+
+type User={name:string;email:string};
+type Tab='up'|'soon'|'cinema'|'lib';
+const TABS:[Tab,string,typeof Play][]=[['up','המשך',Play],['soon','בקרוב',CalendarClock],['cinema','קולנוע',Clapperboard],['lib','הספרייה',Library]];
+const KIND_ICON:Record<Kind,typeof Tv>={anime:Sparkles,tv:Tv,movie:Film};
+const LS={lib:'unwatch:lib',removed:'unwatch:removed',shows:'unwatch:shows',tab:'unwatch:tab',size:'unwatch:size'};
+const read=<T,>(k:string,d:T):T=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v) as T:d;}catch{return d;}};
+const write=(k:string,v:unknown)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
+// Latin runs inside Hebrew text keep their order ("Jujutsu Kaisen 2").
+const bidi=(t:string)=>t.replace(/[A-Za-z0-9][A-Za-z0-9 .:\/()+&'"!?-]*[A-Za-z0-9)!?]/g,m=>'⁦'+m+'⁩');
+async function api<T>(url:string,init?:RequestInit):Promise<T>{const r=await fetch(url,init);const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||'שגיאה'),{code:j.code});return j as T;}
+const cmp=(a:{s:number;e:number},b:{s:number;e:number})=>a.s-b.s||a.e-b.e;
+const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+
+export function Mark({className}:{className?:string}){return <svg className={className} viewBox="40 40 100 110" aria-hidden="true">
+ <defs><linearGradient id="mk-p" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#c4a8ff"/><stop offset="1" stopColor="#7c4dff"/></linearGradient></defs>
+ <g className="lid"><rect x="44" y="44" width="92" height="26" rx="7" fill="url(#mk-p)"/><path d="M83 49.5 L101 57 L83 64.5Z" fill="#fff" stroke="#fff" strokeWidth="3" strokeLinejoin="round"/></g>
+ <path className="u" d="M62 84 V112 a28 28 0 0 0 56 0 V84" fill="none" stroke="#fff" strokeWidth="22" strokeLinecap="round"/></svg>;}
+function Poster({src,kind}:{src:string|null;kind:Kind}){const I=KIND_ICON[kind];return <span className="poster">{src?<img src={src} alt="" loading="lazy" decoding="async"/>:<I size={26} aria-hidden="true"/>}</span>;}
+function KindPill({kind}:{kind:Kind}){const I=KIND_ICON[kind];return <span className="pill"><I aria-hidden="true"/>{KIND_LABEL[kind]}</span>;}
+function HePills({it}:{it:Pick<Item,'dub'|'subs'>}){return <>{it.dub&&<span className="pill ok"><Mic aria-hidden="true"/>דיבוב</span>}{it.subs&&<span className="pill ok"><Captions aria-hidden="true"/>כתוביות</span>}</>;}
+
+function useSheet(close:()=>void){const ref=useRef<HTMLButtonElement>(null);
+ useEffect(()=>{const back=document.activeElement as HTMLElement|null;ref.current?.focus();const k=(e:KeyboardEvent)=>{if(e.key==='Escape')close();};window.addEventListener('keydown',k);document.body.style.overflow='hidden';
+  return ()=>{window.removeEventListener('keydown',k);document.body.style.overflow='';back?.focus?.();};},[close]);return ref;}
+
+export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:User|null;login:()=>Promise<void>;logout:()=>Promise<void>}){
+ const [items,setItems]=useState<Item[]>([]);const [removed,setRemoved]=useState<Removed>({});const [shows,setShows]=useState<Record<string,Summary&{at?:number}>>({});
+ const [ready,setReady]=useState(false);const [tab,setTab]=useState<Tab>('up');const [size,setSize]=useState('');
+ const [openKey,setOpenKey]=useState<string|null>(null);const [hit,setHit]=useState<Hit|null>(null);const [searching,setSearching]=useState(false);const [settings,setSettings]=useState(false);
+ const [toast,setToast]=useState<{text:string;undo?:()=>void}|null>(null);const [status,setStatus]=useState<{tmdb:boolean;db:boolean}|null>(null);
+ const [splash,setSplash]=useState(0);const [syncing,setSyncing]=useState(false);
+ const synced=useRef(false);const pending=useRef<ReturnType<typeof setTimeout>|null>(null);
+
+ useEffect(()=>{setItems(read(LS.lib,[]));setRemoved(read(LS.removed,{}));setShows(read(LS.shows,{}));setTab(read(LS.tab,'up'));setSize(read(LS.size,''));setReady(true);
+  if(!sessionStorage.getItem('uw-splash')){sessionStorage.setItem('uw-splash','1');setSplash(2);setTimeout(()=>setSplash(1),1100);setTimeout(()=>setSplash(0),1500);}
+  api<{tmdb:boolean;db:boolean}>('/api/status').then(setStatus).catch(()=>{});},[]);
+ useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(null),5000);return ()=>clearTimeout(t);},[toast]);
+
+ const push=useCallback((list:Item[],rem:Removed)=>{if(!user||!synced.current)return;if(pending.current)clearTimeout(pending.current);
+  pending.current=setTimeout(()=>{api<{ok:boolean;items?:Item[];removed?:Removed}>('/api/library',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items:list,removed:rem})}).catch(()=>{});},1200);},[user]);
+ const commit=useCallback((fn:(l:Item[])=>Item[],rem?:Removed)=>{setItems(prev=>{const next=fn(prev);write(LS.lib,next);const r=rem??read<Removed>(LS.removed,{});if(rem){write(LS.removed,rem);setRemoved(rem);}push(next,r);return next;});},[push]);
+ // Signed in: the server copy and this phone's copy are merged once, then every change is sent up.
+ const sync=useCallback(async()=>{if(!user)return;setSyncing(true);try{const r=await api<{ok:boolean;items:Item[];removed:Removed}>('/api/library');if(r.ok){const rem=mergeRemoved(read(LS.removed,{}),r.removed);
+   const list=merge(read(LS.lib,[]),r.items,rem);write(LS.lib,list);write(LS.removed,rem);setItems(list);setRemoved(rem);synced.current=true;push(list,rem);}}catch{}finally{setSyncing(false);}},[user,push]);
+ useEffect(()=>{if(ready)sync();},[ready,sync]);
+
+ const upsert=useCallback((x:Item)=>commit(l=>[{...x,updated:Date.now()},...l.filter(i=>i.key!==x.key)]),[commit]);
+ const remove=useCallback((key:string)=>{const it=items.find(i=>i.key===key);const rem={...read<Removed>(LS.removed,{}),[key]:Date.now()};commit(l=>l.filter(i=>i.key!==key),rem);
+  if(it)setToast({text:'הוסר: '+it.title,undo:()=>{const r={...read<Removed>(LS.removed,{})};delete r[key];commit(l=>[{...it,updated:Date.now()},...l],r);}});},[items,commit]);
+
+ // Episode counts and next-episode dates, refreshed every few hours.
+ const loadShows=useCallback(async(force=false)=>{const cur=read<Record<string,Summary&{at?:number}>>(LS.shows,{});const keys=read<Item[]>(LS.lib,[]).filter(i=>i.media==='tv'||(i.media==='movie'&&i.status==='plan')).map(i=>i.key)
+  .filter(k=>force||!cur[k]||Date.now()-(cur[k].at||0)>3*3600e3);if(!keys.length)return;
+  try{const r=await api<{shows:Record<string,Summary>}>('/api/shows',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({keys:keys.slice(0,300)})});
+   const next={...cur};for(const [k,v] of Object.entries(r.shows))next[k]={...v,at:Date.now()};write(LS.shows,next);setShows(next);}catch{}},[]);
+ useEffect(()=>{if(ready)loadShows();},[ready,items.length,loadShows]);
+ useEffect(()=>{const v=()=>{if(document.visibilityState==='visible')loadShows();};document.addEventListener('visibilitychange',v);return ()=>document.removeEventListener('visibilitychange',v);},[loadShows]);
+
+ const goTab=(t:Tab)=>{setTab(t);write(LS.tab,t);window.scrollTo({top:0});};
+ const open=(key:string,h?:Hit|null)=>{setHit(h||null);setOpenKey(key);};
+ const markNext=(it:Item)=>{const sum=shows[it.key];if(!sum)return;const nx=after(it.at,sum.seasons);if(!nx)return;
+  const more=after(nx,sum.seasons);const ended=!more&&/הסתיימה|בוטלה/.test(sum.status);
+  upsert({...it,at:nx,mid:null,status:ended?'done':it.status==='plan'?'watching':it.status,watchedAt:Date.now()});
+  setToast({text:'סומן: '+epLabel(nx,sum.seasons.length)+(ended?' - סיימת את הסדרה':''),undo:()=>upsert(it)});};
+
+ const byKey=useMemo(()=>new Map(items.map(i=>[i.key,i])),[items]);
+ const ups=useMemo(()=>items.filter(i=>i.media==='tv'&&(i.status==='watching')).map(i=>({it:i,up:shows[i.key]?upNext(i,shows[i.key]):null})),[items,shows]);
+ const readyCount=ups.filter(x=>x.up?.state==='ready').length;
+ const toWatch=[...ups].sort((a,b)=>{const r=(u:Up|null)=>u?.state==='ready'?0:u?.state==='wait'?1:2;return r(a.up)-r(b.up)||b.it.updated-a.it.updated;});
+ const midMovies=items.filter(i=>i.media==='movie'&&i.status==='watching');
+ const soon=useMemo(()=>{const t=todayISO();const out:{date:string;it:Item;label:string}[]=[];
+  for(const it of items){if(it.status==='dropped')continue;const s=shows[it.key];
+   if(it.media==='tv'&&s?.next?.air&&s.next.air>=t)out.push({date:s.next.air,it,label:epLabel(s.next,s.seasons.length)+(s.next.e===1?' - עונה חדשה':'')});
+   if(it.media==='movie'&&it.status==='plan'){const d=s?.release;if(d&&d>=t)out.push({date:d,it,label:'יוצא'});}}
+  return out.sort((a,b)=>a.date.localeCompare(b.date));},[items,shows]);
+
+ const navRef=useRef<HTMLElement>(null);const [drag,setDrag]=useState<number|null>(null);
+ const slide=(x:number,end:boolean)=>{const r=navRef.current?.getBoundingClientRect();if(!r)return;const i=Math.max(0,Math.min(3,Math.floor((r.right-x)/(r.width/4))));if(end){setDrag(null);goTab(TABS[i][0]);}else setDrag(i);};
+
+ const cls='app'+(size?' '+size:'');
+ return <main className={cls}>
+  {splash>0&&<div className={'splash'+(splash===1?' out':'')} aria-hidden="true"><Mark/><div className="sname">Unwatch</div></div>}
+  <header className="row">
+   <div className="brand" role="img" aria-label="Unwatch"><Mark/><span aria-hidden="true">nwatch</span></div>
+   <div className="actions"><button className="ib" aria-label="חיפוש והוספה" onClick={()=>setSearching(true)}><Search/></button><button className="ib" aria-label="הגדרות" onClick={()=>setSettings(true)}><Settings/></button></div>
+  </header>
+  {status&&!status.tmdb&&<p className="note" role="status">חסר עדיין מפתח TMDB בשרת, אז חיפוש ותאריכי פרקים לא עובדים. ההוראות בהגדרות.</p>}
+
+  {tab==='up'&&<section aria-labelledby="h-up">
+   <h1 id="h-up">ממשיכים לצפות</h1>
+   <p className="sub">{readyCount?readyCount===1?'סדרה אחת מחכה לך':readyCount+' סדרות מחכות לך':ups.length?'אין פרקים חדשים כרגע':''}</p>
+   {ready&&!ups.length&&!midMovies.length&&<div className="empty"><Play aria-hidden="true"/><p>עוד אין כאן כלום. חפש אנימה, סדרה או סרט וסמן "אני צופה".</p><button className="primary" onClick={()=>setSearching(true)}><Search aria-hidden="true"/>חיפוש</button></div>}
+   <ul className="list">{toWatch.map(({it,up})=>{const s=shows[it.key];return <li key={it.key} className="card">
+    <button className="open" onClick={()=>open(it.key)} aria-label={it.title+', פרטים'}><Poster src={it.poster} kind={it.kind}/><div className="info"><div className="nm" dir="auto">{bidi(it.title)}</div>
+     <div className="meta"><KindPill kind={it.kind}/><HePills it={it}/></div>
+     <div className="next">{!up?'טוען…':up.state==='ready'?<>הבא: {epLabel(up.ep,s.seasons.length)}{up.left>1&&<small>{up.left} פרקים מחכים</small>}</>:up.state==='wait'?<>{epLabel(up.ep,s.seasons.length)}<small>{up.air?'יוצא '+whenText(up.air):'עוד אין תאריך'}</small></>:up.state==='caught'?<>ראית הכל<small>{up.air?'הפרק הבא '+whenText(up.air):'מחכים לפרקים חדשים'}</small></>:<>ראית הכל<small>הסדרה הסתיימה</small></>}
+      {it.mid&&<small><Clock size={14} aria-hidden="true"/> עצרת ב{epLabel(it.mid,s?.seasons.length||1)}, דקה {it.mid.min}</small>}</div></div></button>
+    {up?.state==='ready'&&<div className="do"><button className="primary" onClick={()=>markNext(it)}><Check aria-hidden="true"/>צפיתי ב{epLabel(up.ep,s.seasons.length)}</button></div>}
+    {up?.state==='ended'&&<div className="do"><button className="ghost" style={{flex:1}} onClick={()=>upsert({...it,status:'done'})}>להעביר לסיימתי</button></div>}
+   </li>;})}
+   {midMovies.map(it=><li key={it.key} className="card"><button className="open" onClick={()=>open(it.key)} aria-label={it.title+', פרטים'}><Poster src={it.poster} kind={it.kind}/><div className="info"><div className="nm" dir="auto">{bidi(it.title)}</div>
+    <div className="meta"><KindPill kind={it.kind}/></div><div className="next">{it.mid?'עצרת בדקה '+it.mid.min:'באמצע'}</div></div></button>
+    <div className="do"><button className="primary" onClick={()=>{upsert({...it,status:'done',mid:null,watchedAt:Date.now()});setToast({text:'סיימת: '+it.title,undo:()=>upsert(it)});}}><Check aria-hidden="true"/>סיימתי</button></div></li>)}</ul>
+   {items.some(i=>i.status==='plan')&&<button className="ghost full" onClick={()=>goTab('lib')}>ברשימה לצפייה: {items.filter(i=>i.status==='plan').length}</button>}
+  </section>}
+
+  {tab==='soon'&&<section aria-labelledby="h-soon"><h1 id="h-soon">בקרוב</h1><p className="sub">פרקים חדשים וסרטים שאתה מחכה להם</p>
+   {!soon.length&&<div className="empty"><CalendarClock aria-hidden="true"/><p>אין תאריכים קרובים לכותרים שבספרייה.</p></div>}
+   {Object.entries(soon.reduce<Record<string,typeof soon>>((g,x)=>{(g[x.date]||=[]).push(x);return g;},{})).map(([d,l])=><div key={d} className="day"><h2>{whenText(d)}{daysTo(d)>1&&daysTo(d)<7?'':''}<span className="sr"> {d}</span></h2>
+    {l.map(x=><button key={x.it.key} className="line" onClick={()=>open(x.it.key)}><Poster src={x.it.poster} kind={x.it.kind}/><span className="info"><span className="nm" dir="auto">{bidi(x.it.title)}</span><span className="meta">{x.label} · {KIND_LABEL[x.it.kind]}</span></span></button>)}</div>)}
+  </section>}
+
+  {tab==='cinema'&&<Cinema open={open} byKey={byKey}/>}
+
+  {tab==='lib'&&<Lib items={items} shows={shows} open={open}/>}
+
+  <nav ref={navRef} aria-label="ניווט ראשי" className={drag!==null?'dragging':''} style={{'--tab':drag??TABS.findIndex(t=>t[0]===tab)} as React.CSSProperties}
+   onTouchStart={e=>slide(e.touches[0].clientX,false)} onTouchMove={e=>slide(e.touches[0].clientX,false)} onTouchEnd={e=>slide(e.changedTouches[0].clientX,true)} onTouchCancel={()=>setDrag(null)}>
+   {TABS.map(([k,label,I])=>{const n=k==='up'?readyCount:0;return <button key={k} className={tab===k?'selected':''} aria-current={tab===k?'page':undefined} aria-label={label+(n?', '+n+' מחכות':'')} onClick={()=>goTab(k)}>
+    <span className="ni"><I size={20} aria-hidden="true"/>{n>0&&<b className="nb" aria-hidden="true">{n}</b>}</span><span aria-hidden="true">{label}</span></button>;})}
+  </nav>
+
+  {searching&&<SearchSheet close={()=>setSearching(false)} open={open} byKey={byKey}/>}
+  {openKey&&<DetailSheet key={openKey} k={openKey} hit={hit} item={byKey.get(openKey)||null} close={()=>setOpenKey(null)} save={upsert} remove={k=>{remove(k);}} onSeen={()=>loadShows(true)}/>}
+  {settings&&<SettingsSheet close={()=>setSettings(false)} size={size} setSize={v=>{setSize(v);write(LS.size,v);}} user={user} canLogin={canLogin} login={login} logout={logout} status={status} syncing={syncing} sync={sync}
+   items={items} restore={list=>{commit(l=>merge(l,list,removed));setToast({text:'השחזור הושלם'});}}/>}
+  <div aria-live="polite" className={toast?'toast':'sr'}>{toast&&<>{toast.text}{toast.undo&&<button onClick={()=>{toast.undo!();setToast(null);}}>ביטול</button>}</>}</div>
+ </main>;}
+
+function Cinema({open,byKey}:{open:(k:string,h?:Hit)=>void;byKey:Map<string,Item>}){const [d,setD]=useState<{now:Hit[];soon:Hit[]}|null>(null);const [err,setErr]=useState('');
+ const load=useCallback(()=>{setErr('');api<{now:Hit[];soon:Hit[]}>('/api/cinema').then(setD).catch(e=>setErr(e.message));},[]);useEffect(load,[load]);
+ const seen=[...byKey.values()].filter(i=>i.source==='cinema').sort((a,b)=>(b.watchedAt||0)-(a.watchedAt||0));
+ return <section aria-labelledby="h-cin"><h1 id="h-cin">קולנוע</h1><p className="sub">מה מוקרן עכשיו בישראל</p>
+  {err&&<div className="note" role="alert">{err} <button className="ghost full" onClick={load}><RefreshCw aria-hidden="true"/>לנסות שוב</button></div>}
+  {!d&&!err&&<p className="setNote" role="status">טוען…</p>}
+  {d&&<><ul className="grid">{d.now.map(h=><li key={h.key}><button className="tile" onClick={()=>open(h.key,h)}><Poster src={h.poster} kind={h.kind}/><span dir="auto">{bidi(h.title)}</span>{byKey.get(h.key)?.status==='done'&&<small>ראית ✓</small>}</button></li>)}</ul>
+   {d.soon.length>0&&<><h2 className="sec">בקרוב לקולנוע</h2><div>{d.soon.slice(0,20).map(h=><button key={h.key} className="line" style={{marginTop:8}} onClick={()=>open(h.key,h)}><Poster src={h.poster} kind={h.kind}/><span className="info"><span className="nm" dir="auto">{bidi(h.title)}</span><span className="meta">{h.release?whenText(h.release):''}</span></span></button>)}</div></>}</>}
+  {seen.length>0&&<><h2 className="sec">ראיתי בקולנוע</h2><div>{seen.map(i=><button key={i.key} className="line" style={{marginTop:8}} onClick={()=>open(i.key)}><Poster src={i.poster} kind={i.kind}/><span className="info"><span className="nm" dir="auto">{bidi(i.title)}</span><span className="meta">{i.watchedAt?new Date(i.watchedAt).toLocaleDateString('he-IL'):''}</span></span></button>)}</div></>}
+ </section>;}
+
+function Lib({items,shows,open}:{items:Item[];shows:Record<string,Summary>;open:(k:string)=>void}){const [kind,setKind]=useState<Kind|''>('');const [st,setSt]=useState<Status|''>('');const [he,setHe]=useState(false);const [q,setQ]=useState('');
+ const list=items.filter(i=>(!kind||i.kind===kind)&&(!st||i.status===st)&&(!he||i.dub||i.subs)&&(!q||(i.title+' '+i.orig).toLowerCase().includes(q.toLowerCase()))).sort((a,b)=>b.updated-a.updated);
+ const count=(k:Kind)=>items.filter(i=>i.kind===k).length;
+ return <section aria-labelledby="h-lib"><h1 id="h-lib">הספרייה</h1><p className="sub">{items.length} כותרים</p>
+  <div className="chips" role="group" aria-label="סוג"><button className="chip" aria-pressed={!kind} onClick={()=>setKind('')}>הכל</button>{(['anime','tv','movie'] as Kind[]).map(k=><button key={k} className="chip" aria-pressed={kind===k} onClick={()=>setKind(kind===k?'':k)}>{k==='anime'?'אנימה':k==='tv'?'סדרות':'סרטים'} <b>{count(k)}</b></button>)}</div>
+  <div className="chips" role="group" aria-label="מצב">{(Object.keys(STATUS_LABEL) as Status[]).map(s=><button key={s} className="chip" aria-pressed={st===s} onClick={()=>setSt(st===s?'':s)}>{STATUS_LABEL[s]}</button>)}<button className="chip" aria-pressed={he} onClick={()=>setHe(!he)}><Languages size={16} aria-hidden="true"/>בעברית</button></div>
+  {items.length>6&&<label className="search"><Search size={20} aria-hidden="true"/><span className="sr">חיפוש בספרייה</span><input value={q} onChange={e=>setQ(e.target.value)} placeholder="חיפוש בספרייה" enterKeyHint="search"/></label>}
+  {!list.length&&<div className="empty"><Library aria-hidden="true"/><p>{items.length?'אין כותרים שמתאימים לסינון.':'הספרייה ריקה.'}</p></div>}
+  <ul className="list">{list.map(i=>{const s=shows[i.key];return <li key={i.key}><button className="card open" onClick={()=>open(i.key)}><Poster src={i.poster} kind={i.kind}/><span className="info"><span className="nm" dir="auto">{bidi(i.title)}</span>
+   <span className="meta"><KindPill kind={i.kind}/><span className="pill dim">{STATUS_LABEL[i.status]}</span><HePills it={i}/></span>
+   <span className="meta">{i.media==='tv'?(i.at?'ראית עד '+epLabel(i.at,s?.seasons.length||1):'עוד לא התחלת'):i.year}</span></span></button></li>;})}</ul>
+ </section>;}
+
+function SearchSheet({close,open,byKey}:{close:()=>void;open:(k:string,h:Hit)=>void;byKey:Map<string,Item>}){const ref=useSheet(close);const [q,setQ]=useState('');const [res,setRes]=useState<Hit[]|null>(null);const [err,setErr]=useState('');const inp=useRef<HTMLInputElement>(null);
+ useEffect(()=>{inp.current?.focus();},[]);
+ useEffect(()=>{const t=q.trim();if(t.length<2){setRes(null);return;}const h=setTimeout(()=>{setErr('');api<{results:Hit[]}>('/api/search?q='+encodeURIComponent(t)).then(r=>setRes(r.results)).catch(e=>setErr(e.message));},350);return ()=>clearTimeout(h);},[q]);
+ return <div className="sheet" role="dialog" aria-modal="true" aria-label="חיפוש"><div className="sheetTop"><h2 style={{margin:0}}>חיפוש</h2><button ref={ref} className="ib" aria-label="סגירה" onClick={close}><X/></button></div>
+  <label className="search"><Search size={20} aria-hidden="true"/><span className="sr">שם של אנימה, סדרה או סרט</span><input ref={inp} value={q} onChange={e=>setQ(e.target.value)} placeholder="אנימה, סדרה או סרט" enterKeyHint="search" autoComplete="off"/></label>
+  {err&&<p className="note" role="alert">{err}</p>}
+  <div role="status" className="sr">{res?res.length+' תוצאות':''}</div>
+  {res&&!res.length&&<p className="setNote">לא נמצא. נסה בעברית או באנגלית.</p>}
+  <div style={{marginTop:12}}>{res?.map(h=>{const have=byKey.get(h.key);return <button key={h.key} className="line" onClick={()=>open(h.key,h)}><Poster src={h.poster} kind={h.kind}/><span className="info"><span className="nm" dir="auto">{bidi(h.title)}</span>
+   <span className="meta">{KIND_LABEL[h.kind]}{h.year&&' · '+h.year}{have&&' · '+STATUS_LABEL[have.status]}</span></span></button>;})}</div>
+ </div>;}
+
+function Tri({label,icon:I,value,set}:{label:string;icon:typeof Mic;value:boolean|null;set:(v:boolean|null)=>void}){const id=useId();return <div style={{marginTop:12}}>
+ <div className="setNote" style={{display:'flex',alignItems:'center',gap:6,margin:'0 0 6px'}}><I size={18} aria-hidden="true"/><span id={id}>{label}</span></div>
+ <div className="seg" role="group" aria-labelledby={id}>{([[true,'יש'],[false,'אין'],[null,'לא ידוע']] as const).map(([v,t])=><button key={t} aria-pressed={value===v} onClick={()=>set(v)}>{t}</button>)}</div></div>;}
+
+function DetailSheet({k,hit,item,close,save,remove,onSeen}:{k:string;hit:Hit|null;item:Item|null;close:()=>void;save:(x:Item)=>void;remove:(k:string)=>void;onSeen:()=>void}){
+ const ref=useSheet(close);const [d,setD]=useState<Detail|null>(null);const [err,setErr]=useState('');const [eps,setEps]=useState<Record<number,{e:number;name:string;air?:string;runtime:number|null}[]>>({});
+ useEffect(()=>{api<Detail>('/api/title?key='+encodeURIComponent(k)).then(setD).catch(e=>setErr(e.message));},[k]);
+ const base=d||hit;const kind=(base?.kind||item?.kind||'tv') as Kind;const title=base?.title||item?.title||'';const media=(base?.media||item?.media||'tv');
+ const make=(status:Status):Item=>({key:k,media,tmdb:base?.tmdb||item?.tmdb||0,kind,title,orig:base?.orig||'',year:base?.year||'',poster:base?.poster||item?.poster||null,status,at:null,mid:null,dub:null,subs:null,rating:null,note:'',added:Date.now(),updated:Date.now()});
+ const set=(p:Partial<Item>)=>{save({...(item||make('plan')),...p});if(!item)onSeen();};
+ const seasons=d?.seasons||[];const nSeasons=seasons.length;
+ const loadSeason=(n:number)=>{if(eps[n]||!base)return;api<{episodes:{e:number;name:string;air?:string;runtime:number|null}[]}>('/api/season?id='+base.tmdb+'&n='+n).then(r=>setEps(x=>({...x,[n]:r.episodes}))).catch(()=>{});};
+ const at=item?.at||null;const nx=after(at,seasons.map(s=>({n:s.n,count:s.count})));
+ const today=todayISO();const [midMin,setMidMin]=useState(String(item?.mid?.min||''));
+ return <div className="sheet" role="dialog" aria-modal="true" aria-label={title||'פרטים'}>
+  <div className="sheetTop"><span/><button ref={ref} className="ib" aria-label="סגירה" onClick={close}><X/></button></div>
+  {err&&!base&&<p className="note" role="alert">{err}</p>}
+  {base&&<>
+   <div className="hero">{d?.backdrop&&<img className="bd" src={d.backdrop} alt=""/>}<Poster src={base.poster} kind={kind}/><div><h2 dir="auto">{bidi(title)}</h2>{base.orig&&base.orig!==title&&<div className="orig" dir="auto">{base.orig}</div>}
+    <div className="meta"><KindPill kind={kind}/>{base.year&&<span>{base.year}</span>}{d?.status&&media==='tv'&&<span>· {d.status}</span>}{d?.runtime?<span>· {d.runtime} דק׳</span>:null}</div></div></div>
+   {d?.genres.length?<p className="setNote">{d.genres.join(' · ')}</p>:null}
+   {base.overview&&<p className="over" dir="auto">{base.overview}</p>}
+   {media==='tv'&&d?.next?.air&&<p className="setNote"><CalendarClock size={16} aria-hidden="true"/> הפרק הבא: {epLabel(d.next,nSeasons)} - {whenText(d.next.air)}</p>}
+   {media==='movie'&&base.release&&base.release>=today&&<p className="setNote"><Ticket size={16} aria-hidden="true"/> בקולנוע בישראל: {whenText(base.release)}</p>}
+
+   {!item?<div className="do" style={{flexWrap:'wrap'}}>
+     <button className="primary" onClick={()=>set({status:media==='movie'?'done':'watching',...(media==='movie'?{watchedAt:Date.now()}:{})})}>{media==='movie'?<><Check aria-hidden="true"/>ראיתי</>:<><Play aria-hidden="true"/>אני צופה</>}</button>
+     <button className="ghost" style={{flex:1}} onClick={()=>set({status:'plan'})}><Plus aria-hidden="true"/>לרשימה</button>
+     {media==='movie'&&<button className="ghost full" onClick={()=>set({status:'done',watchedAt:Date.now(),source:'cinema'})}><Ticket aria-hidden="true"/>ראיתי בקולנוע</button>}</div>
+   :<section className="set" aria-labelledby="h-st"><h3 id="h-st">מצב</h3><div className="seg" role="group" aria-labelledby="h-st">{(Object.keys(STATUS_LABEL) as Status[]).map(s=><button key={s} aria-pressed={item.status===s} onClick={()=>set({status:s,...(s==='done'&&media==='movie'&&!item.watchedAt?{watchedAt:Date.now()}:{})})}>{STATUS_LABEL[s]}</button>)}</div>
+     {media==='movie'&&item.status==='done'&&<button className="ghost full" aria-pressed={item.source==='cinema'} onClick={()=>set({source:item.source==='cinema'?undefined:'cinema'})}><Ticket aria-hidden="true"/>{item.source==='cinema'?'ראיתי בקולנוע ✓':'ראיתי בקולנוע'}</button>}</section>}
+
+   {item&&media==='tv'&&nSeasons>0&&<section className="set" aria-labelledby="h-at"><h3 id="h-at"><Pause aria-hidden="true"/>איפה עצרתי</h3>
+    <div className="step"><button className="ib" aria-label="פרק אחד אחורה" disabled={!at} onClick={()=>set({at:at?before(at,seasons):null,mid:null})}><Minus/></button>
+     <b aria-live="polite">{at?'ראיתי עד '+epLabel(at,nSeasons):'עוד לא התחלתי'}</b>
+     <button className="ib" aria-label="צפיתי בפרק הבא" disabled={!nx} onClick={()=>set({at:nx,mid:null,status:item.status==='plan'?'watching':item.status,watchedAt:Date.now()})}><Plus/></button></div>
+    {nx&&<label className="field">עצרתי באמצע {epLabel(nx,nSeasons)}, בדקה:<input inputMode="numeric" pattern="[0-9]*" value={midMin} onChange={e=>setMidMin(e.target.value.replace(/\D/g,'').slice(0,3))}
+     onBlur={()=>set({mid:midMin?{s:nx.s,e:nx.e,min:+midMin}:null})} placeholder="למשל 14"/></label>}
+    {seasons.map(s=><details key={s.n} className="fold" onToggle={e=>{if((e.target as HTMLDetailsElement).open)loadSeason(s.n);}}><summary><span>{nSeasons>1?'עונה '+s.n:'פרקים'} <span className="setNote" style={{display:'inline'}}>· {s.count} פרקים</span></span><ChevronDown size={20} aria-hidden="true"/></summary>
+     <div>{!eps[s.n]?<p className="setNote" role="status">טוען…</p>:<ul className="eps">{eps[s.n].map(e=>{const pos={s:s.n,e:e.e};const w=!!at&&cmp(pos,at)<=0;const out=!e.air||e.air<=today;
+      return <li key={e.e}><button aria-pressed={w} disabled={!out&&!w} onClick={()=>set({at:w&&at&&cmp(pos,at)===0?before(pos,seasons):pos,mid:null,status:item.status==='plan'?'watching':item.status,watchedAt:Date.now()})}
+       aria-label={'פרק '+e.e+(e.name?', '+e.name:'')+(w?', נצפה':'')+(!out&&e.air?', יוצא '+whenText(e.air):'')}>
+       <span className="ck">{w&&<Check aria-hidden="true"/>}</span><span className="t"><span dir="auto">{e.e}. {e.name?bidi(e.name):'פרק '+e.e}</span><small>{e.air?(out?new Date(e.air+'T00:00').toLocaleDateString('he-IL'):'יוצא '+whenText(e.air)):''}{e.runtime?' · '+e.runtime+' דק׳':''}</small></span></button></li>;})}</ul>}</div></details>)}
+   </section>}
+   {item&&media==='movie'&&item.status==='watching'&&<section className="set"><h3><Pause aria-hidden="true"/>איפה עצרתי</h3><label className="field">עצרתי בדקה:<input inputMode="numeric" pattern="[0-9]*" value={midMin} onChange={e=>setMidMin(e.target.value.replace(/\D/g,'').slice(0,3))} onBlur={()=>set({mid:midMin?{s:0,e:0,min:+midMin}:null})} placeholder="למשל 40"/></label></section>}
+
+   <section className="set" aria-labelledby="h-he"><h3 id="h-he"><Languages aria-hidden="true"/>בעברית ואיפה לראות</h3>
+    {!d?<p className="setNote" role="status">טוען…</p>:<>
+     {d.providers.stream.length?<><p className="setNote" style={{margin:'0 0 4px'}}>בסטרימינג בישראל:</p><div className="prov">{d.providers.stream.map(p=><span key={p.name}>{p.logo&&<img src={p.logo} alt=""/>}{p.name}</span>)}</div></>:<p className="setNote">לא נמצא בסטרימינג בישראל.</p>}
+     {(d.providers.rent.length>0||d.providers.buy.length>0)&&<><p className="setNote" style={{margin:'10px 0 4px'}}>להשכרה או קנייה:</p><div className="prov">{[...new Map([...d.providers.rent,...d.providers.buy].map(p=>[p.name,p])).values()].map(p=><span key={p.name}>{p.logo&&<img src={p.logo} alt=""/>}{p.name}</span>)}</div></>}
+     {!d.heTitle&&<p className="setNote">אין לכותר הזה שם או תקציר בעברית ב-TMDB.</p>}</>}
+    {item?<><Tri label="דיבוב לעברית" icon={Mic} value={item.dub} set={v=>set({dub:v})}/><Tri label="כתוביות בעברית" icon={Captions} value={item.subs} set={v=>set({subs:v})}/></>
+     :<p className="setNote">אחרי ההוספה אפשר לסמן אם יש דיבוב או כתוביות בעברית.</p>}
+   </section>
+   {item&&<section className="set"><label className="field" style={{marginTop:0}}>הערה<textarea rows={2} defaultValue={item.note} onBlur={e=>{if(e.target.value!==item.note)set({note:e.target.value.slice(0,1000)});}} placeholder="למשל: רואה עם אסיף"/></label>
+    <button className="ghost full bad" onClick={()=>{remove(k);close();}}><Trash2 aria-hidden="true"/>הסרה מהספרייה</button></section>}
+  </>}
+  {!base&&!err&&<p className="setNote" role="status">טוען…</p>}
+ </div>;}
+
+function SettingsSheet({close,size,setSize,user,canLogin,login,logout,status,syncing,sync,items,restore}:{close:()=>void;size:string;setSize:(v:string)=>void;user:User|null;canLogin:boolean;login:()=>Promise<void>;logout:()=>Promise<void>;
+ status:{tmdb:boolean;db:boolean}|null;syncing:boolean;sync:()=>void;items:Item[];restore:(l:Item[])=>void}){const ref=useSheet(close);const file=useRef<HTMLInputElement>(null);const [msg,setMsg]=useState('');
+ const backup=()=>{const b=new Blob([JSON.stringify({app:'unwatch',v:1,items},null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='unwatch-'+todayISO()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),3000);};
+ return <div className="sheet" role="dialog" aria-modal="true" aria-label="הגדרות"><div className="sheetTop"><h2 style={{margin:0}}>הגדרות</h2><button ref={ref} className="ib" aria-label="סגירה" onClick={close}><X/></button></div>
+  <section className="set" aria-labelledby="h-size"><h3 id="h-size">גודל טקסט</h3><div className="seg" role="group" aria-labelledby="h-size">{([['','רגיל'],['large','גדול'],['xlarge','גדול מאוד']] as const).map(([v,t])=><button key={t} aria-pressed={size===v} onClick={()=>setSize(v)}>{t}</button>)}</div></section>
+  <section className="set" aria-labelledby="h-sync"><h3 id="h-sync">סנכרון</h3>
+   {user?<><p className="setNote">מחובר בתור {user.email}. הספרייה נשמרת גם בשרת.</p>{status&&!status.db&&<p className="setNote">השרת עוד לא מחובר למסד הנתונים, אז הסנכרון לא פעיל.</p>}
+     <div className="do"><button className="ghost" style={{flex:1}} onClick={sync} disabled={syncing}><RefreshCw aria-hidden="true"/>{syncing?'מסנכרן…':'סנכרון עכשיו'}</button><form action={logout} style={{flex:1,display:'flex'}}><button className="ghost" style={{flex:1}}><LogOut aria-hidden="true"/>התנתקות</button></form></div></>
+   :canLogin?<><p className="setNote">כרגע הספרייה שמורה רק בטלפון הזה. התחברות שומרת אותה גם בשרת.</p><form action={login}><button className="primary full"><LogIn aria-hidden="true"/>התחברות עם Google</button></form></>
+   :<p className="setNote">הספרייה שמורה בטלפון הזה. התחברות לסנכרון תתווסף בהמשך.</p>}</section>
+  <section className="set" aria-labelledby="h-bk"><h3 id="h-bk">גיבוי</h3><div className="do"><button className="ghost" style={{flex:1}} onClick={backup}><Download aria-hidden="true"/>שמירת קובץ</button>
+   <button className="ghost" style={{flex:1}} onClick={()=>file.current?.click()}><Upload aria-hidden="true"/>שחזור מקובץ</button></div>
+   <input ref={file} type="file" accept="application/json,.json" hidden onChange={async e=>{const f=e.target.files?.[0];if(!f)return;try{const j=JSON.parse(await f.text());if(j.app!=='unwatch'||!Array.isArray(j.items))throw 0;restore(j.items);setMsg('שוחזרו '+j.items.length+' כותרים');}catch{setMsg('הקובץ לא נראה כמו גיבוי של Unwatch');}e.target.value='';}}/>
+   {msg&&<p className="setNote" role="status">{msg}</p>}</section>
+  {status&&!status.tmdb&&<section className="set"><h3>מפתח TMDB</h3><p className="setNote">החיפוש, הפרקים ותאריכי היציאה מגיעים מ-TMDB. צריך להוסיף ב-Vercel משתנה TMDB_TOKEN.</p></section>}
+  <p className="setNote" style={{textAlign:'center',marginTop:20}}>נתונים על סרטים וסדרות: TMDB. המוצר משתמש ב-TMDB API אך אינו מאושר או נתמך על ידה.</p>
+ </div>;}
