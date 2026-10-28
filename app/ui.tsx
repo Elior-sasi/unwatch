@@ -97,7 +97,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
   {tab==='up'&&<section className="tabIn" aria-labelledby="h-up">
    <h1 id="h-up">ממשיכים לצפות</h1>
    <p className="sub">{readyCount?readyCount===1?'סדרה אחת מחכה לך':readyCount+' סדרות מחכות לך':ups.length?'אין פרקים חדשים כרגע':''}</p>
-   {ready&&!ups.length&&!midMovies.length&&<div className="empty"><Play aria-hidden="true"/><p>עוד אין כאן כלום. חפש אנימה, סדרה או סרט וסמן "אני צופה".</p><button className="primary" onClick={()=>setSearching(true)}><Search aria-hidden="true"/>חיפוש</button></div>}
+   {ready&&!ups.length&&!midMovies.length&&<div className="empty"><Play aria-hidden="true"/><p>עוד אין כאן כלום. חפש אנימה, סדרה או סרט וסמן "אני צופה".</p><button className="primary" style={{flex:"none",minWidth:200}} onClick={()=>setSearching(true)}><Search aria-hidden="true"/>חיפוש</button></div>}
    <ul className="list">{toWatch.map(({it,up},i)=>{const s=shows[it.key];return <li key={it.key} className="card rise" style={{'--i':i} as React.CSSProperties}>
     <button className="open" onClick={()=>open(it.key)} aria-label={it.title+', פרטים'}><Poster src={it.poster} kind={it.kind}/><div className="info"><div className="nm" dir="auto">{bidi(it.title)}</div>
      <div className="meta"><KindPill kind={it.kind}/><HePills it={it}/></div>
