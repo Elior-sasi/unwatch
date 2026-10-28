@@ -146,3 +146,21 @@ nav button .ni svg{transition:transform .25s cubic-bezier(.3,1.6,.5,1)}nav butto
 @keyframes splashOut{to{opacity:0;visibility:hidden}}
 .splash .smark .u{animation-delay:.1s}.splash .smark .lid{animation-delay:.4s}.splash .smark .lid path{animation-delay:1.15s}.splash .sname{animation-delay:.7s}
 @media(prefers-reduced-motion:reduce){.splash{animation:none!important}}
+
+/* Hebrew + where to watch */
+.yn{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.yn>div{display:flex;flex-direction:column;align-items:flex-start;gap:4px;background:#100e18;border:1px solid var(--line);border-radius:16px;padding:12px}
+.yn svg{width:20px;height:20px;color:var(--mut)}.yn span{color:var(--mut);font-size:calc(14px*var(--fs))}
+.yn b{font-size:calc(20px*var(--fs));font-weight:700}.yn b.y{color:#8cf0c6}
+.offers{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:8px}
+.offer{display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 12px;border-radius:16px;background:#1a1724;border:1px solid var(--line);color:var(--ink)}
+.offer img{width:40px;height:40px;border-radius:10px;flex-shrink:0}.offer .t{flex:1;min-width:0;display:grid;gap:2px}.offer small{color:var(--mut);font-size:calc(14px*var(--fs))}
+.offer .tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:2px}.offer>svg{color:var(--mut);flex-shrink:0}
+a.ghost{text-decoration:none}
+.stars{display:flex;gap:6px}.stars button{width:48px;height:48px;border-radius:12px;display:grid;place-items:center;color:#5d5677;background:#100e18;border:1px solid var(--line)}
+.stars button[aria-pressed=true]{color:#ffd36b;border-color:#6b5a2a;background:#2a2312}.stars button[aria-pressed=true] svg{fill:currentColor}
+.stars button svg{width:24px;height:24px;transition:transform .2s cubic-bezier(.3,1.6,.5,1)}.stars button:active svg{transform:scale(1.25)}
+.hscroll{display:flex;gap:12px;overflow-x:auto;list-style:none;padding:0 0 4px;margin:10px 0 0;scrollbar-width:none;scroll-snap-type:x mandatory}.hscroll::-webkit-scrollbar{display:none}
+.hscroll li{flex:0 0 108px;scroll-snap-align:start}
+.ptr{display:grid;place-items:center;overflow:hidden;color:var(--acc);transition:height .2s ease}.ptr svg{width:26px;height:26px}
+.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}

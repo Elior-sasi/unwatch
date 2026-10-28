@@ -63,3 +63,29 @@ test('library merge keeps the newer edit and removals',()=>{
  assert.deepEqual(m.map(x=>x.key).sort(),['tv:1','tv:3']);assert.deepEqual(m.find(x=>x.key==='tv:1')!.at,{s:1,e:4});
  assert.equal(merge([item('tv:2',4)],[],{'tv:2':3}).length,1);
 });
+import {pickNode,summarize,cleanLink} from '../lib/justwatch';
+import {trailerOf} from '../lib/tmdb';
+const node=(t:string,y:number,imdb:string|null,type='MOVIE',offers:unknown[]=[])=>({objectType:type,content:{title:t,originalReleaseYear:y,fullPath:'/il/x',externalIds:{imdbId:imdb}},offers} as never);
+test('JustWatch match by IMDb, then by title and year',()=>{
+ const list=[node('Frozen',2013,'tt1'),node('Frozen II',2019,'tt2'),node('Frozen',2013,'tt9','SHOW')];
+ assert.equal((pickNode(list,{imdb:'tt2',title:'x',media:'movie'}) as never as {content:{title:string}}).content.title,'Frozen II');
+ assert.equal((pickNode(list,{imdb:null,title:'פרוזן',orig:'Frozen',year:'2013',media:'movie'}) as never as {content:{externalIds:{imdbId:string}}}).content.externalIds.imdbId,'tt1');
+ assert.equal(pickNode(list,{title:'Frozen',year:'2030',media:'movie'}),null);
+});
+test('Hebrew dub and subtitles per service',()=>{
+ const s=summarize(node('Frozen',2013,'tt1','MOVIE',[
+  {monetizationType:'FLATRATE',standardWebURL:'https://www.disneyplus.com/movies/x?utm_source=jw',package:{clearName:'Disney Plus',icon:'/icon/1/{profile}/d.{format}'},audioLanguages:['en','he'],subtitleLanguages:['he','en']},
+  {monetizationType:'RENT',standardWebURL:'https://tv.apple.com/x',package:{clearName:'Apple TV'},audioLanguages:['en'],subtitleLanguages:['iw']},
+  {monetizationType:'CINEMA',package:{clearName:'Cinema'}}]));
+ assert.equal(s.dub,true);assert.equal(s.subs,true);assert.equal(s.offers.length,2);
+ assert.equal(s.offers[0].service,'Disney Plus');assert.equal(s.offers[0].url,'https://www.disneyplus.com/movies/x');assert.equal(s.offers[1].dub,false);assert.equal(s.offers[1].heSubs,true);
+ const none=summarize(node('X',2020,null,'MOVIE',[{monetizationType:'FLATRATE',package:{clearName:'Netflix'},audioLanguages:[],subtitleLanguages:[]}]));
+ assert.equal(none.dub,null);assert.equal(none.subs,null);
+ assert.equal(summarize(null).found,false);
+ assert.equal(cleanLink('https://www.netflix.com/title/123?at=1&ct=2'),'https://www.netflix.com/title/123');
+});
+test('trailer prefers Hebrew, then official',()=>{
+ assert.equal(trailerOf([{site:'YouTube',type:'Trailer',key:'a'},{site:'YouTube',type:'Trailer',key:'b',official:true}]),'https://www.youtube.com/watch?v=b');
+ assert.equal(trailerOf([{site:'YouTube',type:'Trailer',key:'a',official:true},{site:'YouTube',type:'Teaser',key:'h',iso_639_1:'he'}]),'https://www.youtube.com/watch?v=h');
+ assert.equal(trailerOf([{site:'Vimeo',type:'Trailer',key:'v'}]),null);
+});

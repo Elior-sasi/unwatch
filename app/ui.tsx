@@ -1,8 +1,10 @@
 'use client';
 import {useCallback,useEffect,useId,useMemo,useRef,useState} from 'react';
-import {Play,CalendarClock,Clapperboard,Library,Search,Settings,X,Check,Plus,Minus,Pause,Trash2,Tv,Film,Sparkles,Languages,Captions,Mic,ChevronDown,Ticket,Download,Upload,LogIn,LogOut,RefreshCw,Clock} from 'lucide-react';
+import {Star,ExternalLink,Clapperboard,MonitorPlay as TrailerIcon,Users,Play,CalendarClock,Library,Search,Settings,X,Check,Plus,Minus,Pause,Trash2,Tv,Film,Sparkles,Languages,Captions,Mic,ChevronDown,Ticket,Download,Upload,LogIn,LogOut,RefreshCw,Clock} from 'lucide-react';
 import {after,before,upNext,epLabel,whenText,daysTo,type Up} from '@/lib/progress';
 import {merge,mergeRemoved,type Removed} from '@/lib/library';
+import type {HeInfo,Offer} from '@/lib/justwatch';
+import {LANG_HE} from '@/lib/langs';
 import {KIND_LABEL,STATUS_LABEL,type Detail,type Hit,type Item,type Kind,type Status,type Summary} from '@/lib/types';
 
 type User={name:string;email:string};
@@ -25,7 +27,11 @@ export function Mark({className}:{className?:string}){return <svg className={cla
 function Loader({text}:{text:string}){return <div className="loader" role="status"><Mark className="lmark"/><p>{text}</p></div>;}
 function Poster({src,kind}:{src:string|null;kind:Kind}){const I=KIND_ICON[kind];return <span className="poster">{src?<img src={src} alt="" loading="lazy" decoding="async" onLoad={e=>e.currentTarget.classList.add('in')}/>:<I size={26} aria-hidden="true"/>}</span>;}
 function KindPill({kind}:{kind:Kind}){const I=KIND_ICON[kind];return <span className="pill"><I aria-hidden="true"/>{KIND_LABEL[kind]}</span>;}
-function HePills({it}:{it:Pick<Item,'dub'|'subs'>}){return <>{it.dub&&<span className="pill ok"><Mic aria-hidden="true"/>דיבוב</span>}{it.subs&&<span className="pill ok"><Captions aria-hidden="true"/>כתוביות</span>}</>;}
+// The user's own mark wins; otherwise what was found automatically for Israeli services.
+const dubOf=(i:Item)=>i.dub??i.he?.dub??null;const subsOf=(i:Item)=>i.subs??i.he?.subs??null;
+function HePills({it}:{it:Item}){return <>{dubOf(it)&&<span className="pill ok"><Mic aria-hidden="true"/>דיבוב</span>}{subsOf(it)&&<span className="pill ok"><Captions aria-hidden="true"/>כתוביות</span>}</>;}
+const yn=(v:boolean|null|undefined)=>v===true?'יש':v===false?'אין':'לא ידוע';
+const OFFER_TYPE:Record<Offer['type'],string>={stream:'במנוי',free:'חינם',rent:'השכרה',buy:'קנייה'};
 
 function useSheet(close:()=>void){const ref=useRef<HTMLButtonElement>(null);
  useEffect(()=>{const back=document.activeElement as HTMLElement|null;ref.current?.focus();const k=(e:KeyboardEvent)=>{if(e.key==='Escape')close();};window.addEventListener('keydown',k);document.body.style.overflow='hidden';
@@ -62,6 +68,15 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
   try{const r=await api<{shows:Record<string,Summary>}>('/api/shows',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({keys:keys.slice(0,300)})});
    const next={...cur};for(const [k,v] of Object.entries(r.shows))next[k]={...v,at:Date.now()};write(LS.shows,next);setShows(next);}catch{}},[]);
  useEffect(()=>{if(ready)loadShows();},[ready,items.length,loadShows]);
+ // Hebrew dubbing / subtitles for the whole library, checked in the background once a week per title.
+ const heBusy=useRef(false);
+ const loadHe=useCallback(async()=>{if(heBusy.current)return;const keys=read<Item[]>(LS.lib,[]).filter(i=>!i.he||Date.now()-i.he.at>7*864e5).map(i=>i.key).slice(0,40);if(!keys.length)return;heBusy.current=true;
+  try{const r=await api<{he:Record<string,{dub:boolean|null;subs:boolean|null}>}>('/api/he',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({keys})});const now=Date.now();
+   commit(l=>l.map(i=>r.he[i.key]?{...i,he:{dub:r.he[i.key].dub,subs:r.he[i.key].subs,at:now}}:keys.includes(i.key)?{...i,he:{dub:i.he?.dub??null,subs:i.he?.subs??null,at:now}}:i));}catch{}finally{heBusy.current=false;}},[commit]);
+ useEffect(()=>{if(ready&&status?.tmdb)loadHe();},[ready,items.length,status,loadHe]);
+ // Pull down at the top of the page to refresh.
+ const [pull,setPull]=useState(0);const startY=useRef<number|null>(null);
+ const refresh=async()=>{setPull(-1);await Promise.all([loadShows(true),sync()]);setPull(0);setToast({text:'עודכן'});};
  useEffect(()=>{const v=()=>{if(document.visibilityState==='visible')loadShows();};document.addEventListener('visibilitychange',v);return ()=>document.removeEventListener('visibilitychange',v);},[loadShows]);
 
  const goTab=(t:Tab)=>{setTab(t);write(LS.tab,t);window.scrollTo({top:0});};
@@ -86,7 +101,10 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
  const slide=(x:number,end:boolean)=>{const r=navRef.current?.getBoundingClientRect();if(!r)return;const i=Math.max(0,Math.min(3,Math.floor((r.right-x)/(r.width/4))));if(end){setDrag(null);goTab(TABS[i][0]);}else setDrag(i);};
 
  const cls='app'+(size?' '+size:'');
- return <main className={cls}>
+ return <main className={cls} onTouchStart={e=>{startY.current=window.scrollY<=0&&!openKey&&!searching&&!settings?e.touches[0].clientY:null;}}
+  onTouchMove={e=>{if(startY.current==null||pull<0)return;const d=e.touches[0].clientY-startY.current;setPull(d>0?Math.min(d/2,90):0);}}
+  onTouchEnd={()=>{if(pull>=70)refresh();else if(pull>0)setPull(0);startY.current=null;}}>
+  {pull!==0&&<div className="ptr" style={{height:pull<0?56:pull}} aria-hidden="true"><RefreshCw className={pull<0?'spin':''} style={{transform:pull>0?'rotate('+pull*3+'deg)':undefined,opacity:pull<0?1:Math.min(1,pull/70)}}/></div>}
   {splash>0&&<div className={'splash'+(splash===1?' out':'')} aria-hidden="true" onAnimationEnd={e=>{if(e.target===e.currentTarget)setSplash(0);}}><Mark className="smark"/><div className="sname" dir="ltr">Unwatch</div></div>}
   <header className="row">
    <div className="brand" role="img" aria-label="Unwatch"><Mark/><span aria-hidden="true">nwatch</span></div>
@@ -129,7 +147,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
   </nav>
 
   {searching&&<SearchSheet close={()=>setSearching(false)} open={open} byKey={byKey}/>}
-  {openKey&&<DetailSheet key={openKey} k={openKey} hit={hit} item={byKey.get(openKey)||null} close={()=>setOpenKey(null)} save={upsert} remove={k=>{remove(k);}} onSeen={()=>loadShows(true)}/>}
+  {openKey&&<DetailSheet key={openKey} k={openKey} hit={hit} item={byKey.get(openKey)||null} close={()=>setOpenKey(null)} save={upsert} remove={k=>{remove(k);}} onSeen={()=>loadShows(true)} openOther={h=>open(h.key,h)}/>}
   {settings&&<SettingsSheet close={()=>setSettings(false)} size={size} setSize={v=>{setSize(v);write(LS.size,v);}} user={user} canLogin={canLogin} login={login} logout={logout} status={status} syncing={syncing} sync={sync}
    items={items} restore={list=>{commit(l=>merge(l,list,removed));setToast({text:'השחזור הושלם'});}}/>}
   <div aria-live="polite" key={toast?.text||''} className={toast?'toast':'sr'}>{toast&&<>{toast.text}{toast.undo&&<button onClick={()=>{toast.undo!();setToast(null);}}>ביטול</button>}</>}</div>
@@ -146,12 +164,12 @@ function Cinema({open,byKey}:{open:(k:string,h?:Hit)=>void;byKey:Map<string,Item
   {seen.length>0&&<><h2 className="sec">ראיתי בקולנוע</h2><div>{seen.map(i=><button key={i.key} className="line" style={{marginTop:8}} onClick={()=>open(i.key)}><Poster src={i.poster} kind={i.kind}/><span className="info"><span className="nm" dir="auto">{bidi(i.title)}</span><span className="meta">{i.watchedAt?new Date(i.watchedAt).toLocaleDateString('he-IL'):''}</span></span></button>)}</div></>}
  </section>;}
 
-function Lib({items,shows,open}:{items:Item[];shows:Record<string,Summary>;open:(k:string)=>void}){const [kind,setKind]=useState<Kind|''>('');const [st,setSt]=useState<Status|''>('');const [he,setHe]=useState(false);const [q,setQ]=useState('');
- const list=items.filter(i=>(!kind||i.kind===kind)&&(!st||i.status===st)&&(!he||i.dub||i.subs)&&(!q||(i.title+' '+i.orig).toLowerCase().includes(q.toLowerCase()))).sort((a,b)=>b.updated-a.updated);
+function Lib({items,shows,open}:{items:Item[];shows:Record<string,Summary>;open:(k:string)=>void}){const [kind,setKind]=useState<Kind|''>('');const [st,setSt]=useState<Status|''>('');const [he,setHe]=useState<''|'dub'|'subs'>('');const [q,setQ]=useState('');
+ const list=items.filter(i=>(!kind||i.kind===kind)&&(!st||i.status===st)&&(!he||(he==='dub'?dubOf(i):subsOf(i)))&&(!q||(i.title+' '+i.orig).toLowerCase().includes(q.toLowerCase()))).sort((a,b)=>b.updated-a.updated);
  const count=(k:Kind)=>items.filter(i=>i.kind===k).length;
  return <section className="tabIn" aria-labelledby="h-lib"><h1 id="h-lib">הספרייה</h1><p className="sub">{items.length} כותרים</p>
   <div className="chips" role="group" aria-label="סוג"><button className="chip" aria-pressed={!kind} onClick={()=>setKind('')}>הכל</button>{(['anime','tv','movie'] as Kind[]).map(k=><button key={k} className="chip" aria-pressed={kind===k} onClick={()=>setKind(kind===k?'':k)}>{k==='anime'?'אנימה':k==='tv'?'סדרות':'סרטים'} <b>{count(k)}</b></button>)}</div>
-  <div className="chips" role="group" aria-label="מצב">{(Object.keys(STATUS_LABEL) as Status[]).map(s=><button key={s} className="chip" aria-pressed={st===s} onClick={()=>setSt(st===s?'':s)}>{STATUS_LABEL[s]}</button>)}<button className="chip" aria-pressed={he} onClick={()=>setHe(!he)}><Languages size={16} aria-hidden="true"/>בעברית</button></div>
+  <div className="chips" role="group" aria-label="מצב">{(Object.keys(STATUS_LABEL) as Status[]).map(s=><button key={s} className="chip" aria-pressed={st===s} onClick={()=>setSt(st===s?'':s)}>{STATUS_LABEL[s]}</button>)}<button className="chip" aria-pressed={he==='dub'} onClick={()=>setHe(he==='dub'?'':'dub')}><Mic size={16} aria-hidden="true"/>דיבוב</button><button className="chip" aria-pressed={he==='subs'} onClick={()=>setHe(he==='subs'?'':'subs')}><Captions size={16} aria-hidden="true"/>כתוביות</button></div>
   {items.length>6&&<label className="search"><Search size={20} aria-hidden="true"/><span className="sr">חיפוש בספרייה</span><input value={q} onChange={e=>setQ(e.target.value)} placeholder="חיפוש בספרייה" enterKeyHint="search"/></label>}
   {!list.length&&<div className="empty"><Library aria-hidden="true"/><p>{items.length?'אין כותרים שמתאימים לסינון.':'הספרייה ריקה.'}</p></div>}
   <ul className="list">{list.map((i,n)=>{const s=shows[i.key];return <li key={i.key} className="rise" style={{'--i':n} as React.CSSProperties}><button className="card open" onClick={()=>open(i.key)}><Poster src={i.poster} kind={i.kind}/><span className="info"><span className="nm" dir="auto">{bidi(i.title)}</span>
@@ -173,11 +191,12 @@ function SearchSheet({close,open,byKey}:{close:()=>void;open:(k:string,h:Hit)=>v
 
 function Tri({label,icon:I,value,set}:{label:string;icon:typeof Mic;value:boolean|null;set:(v:boolean|null)=>void}){const id=useId();return <div style={{marginTop:12}}>
  <div className="setNote" style={{display:'flex',alignItems:'center',gap:6,margin:'0 0 6px'}}><I size={18} aria-hidden="true"/><span id={id}>{label}</span></div>
- <div className="seg" role="group" aria-labelledby={id}>{([[true,'יש'],[false,'אין'],[null,'לא ידוע']] as const).map(([v,t])=><button key={t} aria-pressed={value===v} onClick={()=>set(v)}>{t}</button>)}</div></div>;}
+ <div className="seg" role="group" aria-labelledby={id}>{([[null,'אוטומטי'],[true,'יש'],[false,'אין']] as const).map(([v,t])=><button key={t} aria-pressed={value===v} onClick={()=>set(v)}>{t}</button>)}</div></div>;}
 
-function DetailSheet({k,hit,item,close,save,remove,onSeen}:{k:string;hit:Hit|null;item:Item|null;close:()=>void;save:(x:Item)=>void;remove:(k:string)=>void;onSeen:()=>void}){
+function DetailSheet({k,hit,item,close,save,remove,onSeen,openOther}:{k:string;hit:Hit|null;item:Item|null;close:()=>void;save:(x:Item)=>void;remove:(k:string)=>void;onSeen:()=>void;openOther:(h:Hit)=>void}){
  const ref=useSheet(close);const [d,setD]=useState<Detail|null>(null);const [err,setErr]=useState('');const [eps,setEps]=useState<Record<number,{e:number;name:string;air?:string;runtime:number|null}[]>>({});
- useEffect(()=>{api<Detail>('/api/title?key='+encodeURIComponent(k)).then(setD).catch(e=>setErr(e.message));},[k]);
+ const [heI,setHeI]=useState<HeInfo|null>(null);
+ useEffect(()=>{api<Detail>('/api/title?key='+encodeURIComponent(k)).then(setD).catch(e=>setErr(e.message));api<HeInfo>('/api/he?key='+encodeURIComponent(k)).then(setHeI).catch(()=>setHeI({found:false,dub:null,subs:null,offers:[],page:null}));},[k]);
  const base=d||hit;const kind=(base?.kind||item?.kind||'tv') as Kind;const title=base?.title||item?.title||'';const media=(base?.media||item?.media||'tv');
  const make=(status:Status):Item=>({key:k,media,tmdb:base?.tmdb||item?.tmdb||0,kind,title,orig:base?.orig||'',year:base?.year||'',poster:base?.poster||item?.poster||null,status,at:null,mid:null,dub:null,subs:null,rating:null,note:'',added:Date.now(),updated:Date.now()});
  const set=(p:Partial<Item>)=>{save({...(item||make('plan')),...p});if(!item)onSeen();};
@@ -193,6 +212,8 @@ function DetailSheet({k,hit,item,close,save,remove,onSeen}:{k:string;hit:Hit|nul
     <div className="meta"><KindPill kind={kind}/>{base.year&&<span>{base.year}</span>}{d?.status&&media==='tv'&&<span>· {d.status}</span>}{d?.runtime?<span>· {d.runtime} דק׳</span>:null}</div></div></div>
    {d?.genres.length?<p className="setNote">{d.genres.join(' · ')}</p>:null}
    {base.overview&&<p className="over" dir="auto">{base.overview}</p>}
+   {d?.cast.length?<p className="setNote"><Users size={16} aria-hidden="true"/> {d.cast.map(bidi).join(' · ')}</p>:null}
+   {d?.trailer&&<a className="ghost full" href={d.trailer} target="_blank" rel="noopener noreferrer"><TrailerIcon aria-hidden="true"/>טריילר<span className="sr"> (נפתח ביוטיוב)</span></a>}
    {media==='tv'&&d?.next?.air&&<p className="setNote"><CalendarClock size={16} aria-hidden="true"/> הפרק הבא: {epLabel(d.next,nSeasons)} - {whenText(d.next.air)}</p>}
    {media==='movie'&&base.release&&base.release>=today&&<p className="setNote"><Ticket size={16} aria-hidden="true"/> בקולנוע בישראל: {whenText(base.release)}</p>}
 
@@ -201,6 +222,7 @@ function DetailSheet({k,hit,item,close,save,remove,onSeen}:{k:string;hit:Hit|nul
      <button className="ghost" style={{flex:1}} onClick={()=>set({status:'plan'})}><Plus aria-hidden="true"/>לרשימה</button>
      {media==='movie'&&<button className="ghost full" onClick={()=>set({status:'done',watchedAt:Date.now(),source:'cinema'})}><Ticket aria-hidden="true"/>ראיתי בקולנוע</button>}</div>
    :<section className="set" aria-labelledby="h-st"><h3 id="h-st">מצב</h3><div className="seg" role="group" aria-labelledby="h-st">{(Object.keys(STATUS_LABEL) as Status[]).map(s=><button key={s} aria-pressed={item.status===s} onClick={()=>set({status:s,...(s==='done'&&media==='movie'&&!item.watchedAt?{watchedAt:Date.now()}:{})})}>{STATUS_LABEL[s]}</button>)}</div>
+     {(item.status==='done'||item.status==='dropped')&&<div style={{marginTop:12}}><p className="setNote" id="h-rate" style={{margin:'0 0 6px'}}>דירוג</p><div className="stars" role="group" aria-labelledby="h-rate">{[1,2,3,4,5].map(n=><button key={n} aria-label={n+' כוכבים'} aria-pressed={(item.rating||0)>=n*2} onClick={()=>set({rating:item.rating===n*2?null:n*2})}><Star aria-hidden="true"/></button>)}</div></div>}
      {media==='movie'&&item.status==='done'&&<button className="ghost full" aria-pressed={item.source==='cinema'} onClick={()=>set({source:item.source==='cinema'?undefined:'cinema'})}><Ticket aria-hidden="true"/>{item.source==='cinema'?'ראיתי בקולנוע ✓':'ראיתי בקולנוע'}</button>}</section>}
 
    {item&&media==='tv'&&nSeasons>0&&<section className="set" aria-labelledby="h-at"><h3 id="h-at"><Pause aria-hidden="true"/>איפה עצרתי</h3>
@@ -218,13 +240,17 @@ function DetailSheet({k,hit,item,close,save,remove,onSeen}:{k:string;hit:Hit|nul
    {item&&media==='movie'&&item.status==='watching'&&<section className="set"><h3><Pause aria-hidden="true"/>איפה עצרתי</h3><label className="field">עצרתי בדקה:<input inputMode="numeric" pattern="[0-9]*" value={midMin} onChange={e=>setMidMin(e.target.value.replace(/\D/g,'').slice(0,3))} onBlur={()=>set({mid:midMin?{s:0,e:0,min:+midMin}:null})} placeholder="למשל 40"/></label></section>}
 
    <section className="set" aria-labelledby="h-he"><h3 id="h-he"><Languages aria-hidden="true"/>בעברית ואיפה לראות</h3>
-    {!d?<p className="setNote" role="status">טוען…</p>:<>
-     {d.providers.stream.length?<><p className="setNote" style={{margin:'0 0 4px'}}>בסטרימינג בישראל:</p><div className="prov">{d.providers.stream.map(p=><span key={p.name}>{p.logo&&<img src={p.logo} alt=""/>}{p.name}</span>)}</div></>:<p className="setNote">לא נמצא בסטרימינג בישראל.</p>}
-     {(d.providers.rent.length>0||d.providers.buy.length>0)&&<><p className="setNote" style={{margin:'10px 0 4px'}}>להשכרה או קנייה:</p><div className="prov">{[...new Map([...d.providers.rent,...d.providers.buy].map(p=>[p.name,p])).values()].map(p=><span key={p.name}>{p.logo&&<img src={p.logo} alt=""/>}{p.name}</span>)}</div></>}
-     {!d.heTitle&&<p className="setNote">אין לכותר הזה שם או תקציר בעברית ב-TMDB.</p>}</>}
-    {item?<><Tri label="דיבוב לעברית" icon={Mic} value={item.dub} set={v=>set({dub:v})}/><Tri label="כתוביות בעברית" icon={Captions} value={item.subs} set={v=>set({subs:v})}/></>
-     :<p className="setNote">אחרי ההוספה אפשר לסמן אם יש דיבוב או כתוביות בעברית.</p>}
+    {!heI?<p className="setNote" role="status">בודק דיבוב וכתוביות…</p>:<>
+     <div className="yn"><div><Mic aria-hidden="true"/><span>דיבוב לעברית</span><b className={heI.dub?'y':''}>{yn(item?.dub??heI.dub)}</b></div><div><Captions aria-hidden="true"/><span>כתוביות בעברית</span><b className={heI.subs?'y':''}>{yn(item?.subs??heI.subs)}</b></div></div>
+     {heI.offers.length>0?<ul className="offers">{heI.offers.map(o=><li key={o.service+o.type}><a className="offer" href={o.url||heI.page||'#'} target="_blank" rel="noopener noreferrer" aria-label={o.service+', '+OFFER_TYPE[o.type]+'. דיבוב לעברית: '+(o.audio.length?(o.dub?'יש':'אין'):'לא ידוע')+'. כתוביות בעברית: '+(o.subs.length?(o.heSubs?'יש':'אין'):'לא ידוע')+'. נפתח בשירות'}>
+       {o.icon?<img src={o.icon} alt=""/>:<Tv aria-hidden="true"/>}<span className="t"><b>{o.service}</b><small>{OFFER_TYPE[o.type]}{o.audio.length?' · שמע: '+o.audio.map(l=>LANG_HE[l.slice(0,2)]||l).join(', '):''}</small>
+       <span className="tags">{o.dub&&<span className="pill ok"><Mic aria-hidden="true"/>דיבוב</span>}{o.heSubs&&<span className="pill ok"><Captions aria-hidden="true"/>כתוביות</span>}{!o.audio.length&&!o.subs.length&&<span className="pill dim">שפות לא ידועות</span>}</span></span><ExternalLink size={18} aria-hidden="true"/></a></li>)}</ul>
+     :d&&d.providers.stream.length?<><p className="setNote" style={{margin:'10px 0 4px'}}>בסטרימינג בישראל:</p><div className="prov">{d.providers.stream.map(p=><span key={p.name}>{p.logo&&<img src={p.logo} alt=""/>}{p.name}</span>)}</div></>
+     :<p className="setNote">לא נמצא בשירותי צפייה בישראל.</p>}
+     {heI.found&&heI.dub===null&&heI.subs===null&&<p className="setNote">השירות לא פרסם אילו שפות יש. אפשר לסמן ידנית.</p>}</>}
+    {item?<details className="fold" style={{marginTop:12}}><summary><span>תיקון ידני</span><ChevronDown size={20} aria-hidden="true"/></summary><div><Tri label="דיבוב לעברית" icon={Mic} value={item.dub} set={v=>set({dub:v})}/><Tri label="כתוביות בעברית" icon={Captions} value={item.subs} set={v=>set({subs:v})}/></div></details>:null}
    </section>
+   {d&&d.similar.length>0&&<section aria-labelledby="h-sim"><h2 className="sec" id="h-sim">אולי תאהב גם</h2><ul className="hscroll">{d.similar.map((h,n)=><li key={h.key} className="rise" style={{'--i':n} as React.CSSProperties}><button className="tile" onClick={()=>openOther(h)}><Poster src={h.poster} kind={h.kind}/><span dir="auto">{bidi(h.title)}</span></button></li>)}</ul></section>}
    {item&&<section className="set"><label className="field" style={{marginTop:0}}>הערה<textarea rows={2} defaultValue={item.note} onBlur={e=>{if(e.target.value!==item.note)set({note:e.target.value.slice(0,1000)});}} placeholder="למשל: רואה עם אסיף"/></label>
     <button className="ghost full bad" onClick={()=>{remove(k);close();}}><Trash2 aria-hidden="true"/>הסרה מהספרייה</button></section>}
   </>}
