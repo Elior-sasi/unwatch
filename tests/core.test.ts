@@ -89,3 +89,18 @@ test('trailer prefers Hebrew, then official',()=>{
  assert.equal(trailerOf([{site:'YouTube',type:'Trailer',key:'a',official:true},{site:'YouTube',type:'Teaser',key:'h',iso_639_1:'he'}]),'https://www.youtube.com/watch?v=h');
  assert.equal(trailerOf([{site:'Vimeo',type:'Trailer',key:'v'}]),null);
 });
+import {parseFiller,slugOf,ranges} from '../lib/filler';
+import {pickAiring} from '../lib/anilist';
+test('filler list parsing',()=>{
+ assert.equal(slugOf('Naruto Shippūden'),'naruto-shippūden');assert.equal(slugOf('One Piece'),'one-piece');assert.equal(slugOf("JoJo's Bizarre Adventure"),'jojos-bizarre-adventure');
+ assert.deepEqual(ranges('54-56, 98'),[54,55,56,98]);
+ const html='<div class="manga_canon"><span class="Label">Manga Canon:</span><span class="Episodes"><a>1-53</a></span></div><div class="mixed_canon/filler"><span class="Label">Mixed</span><span class="Episodes"><a>45</a>, <a>47</a></span></div><div class="filler"><span class="Label">Filler Episodes:</span><span class="Episodes"><a href="/x">54-56</a>, <a>98-99</a></span></div>';
+ assert.deepEqual(parseFiller(html),{filler:[54,55,56,98,99],mixed:[45,47]});
+ assert.deepEqual(parseFiller('<tr class="filler odd"><td class="Number">7</td></tr><tr class="mixed_canon/filler"><td class="Number">9</td></tr>'),{filler:[7],mixed:[9]});
+});
+test('AniList airing pick',()=>{
+ const list=[{id:1,title:{romaji:'Jujutsu Kaisen: Shimetsu Kaiyuu',english:'JUJUTSU KAISEN Season 3'},nextAiringEpisode:{airingAt:Date.parse('2026-10-29T15:00:00Z')/1000,episode:4}},{id:2,title:{romaji:'Other'},nextAiringEpisode:{airingAt:1,episode:1}}];
+ assert.equal(pickAiring(list,['Jujutsu Kaisen'],'2026-10-29')?.episode,4);
+ assert.equal(pickAiring(list,['Jujutsu Kaisen'],'2026-11-10'),null);
+ assert.equal(pickAiring(list,['Bleach']),null);
+});

@@ -1,4 +1,5 @@
 // TMDB (themoviedb.org): titles, Hebrew names, seasons, episode dates, Israeli release dates and where to watch in Israel.
+import {airing} from './anilist';
 import type {Detail,Ep,Hit,Kind,Media,Provider,Providers,Summary} from './types';
 const BASE='https://api.themoviedb.org/3';
 const IMG='https://image.tmdb.org/t/p/';
@@ -59,7 +60,9 @@ export async function detail(media:Media,id:number):Promise<Detail>{
 export function trailerOf(v:{site:string;type:string;key:string;official?:boolean;iso_639_1?:string}[]){const yt=v.filter(x=>x.site==='YouTube'&&/Trailer|Teaser/.test(x.type));
  const best=yt.find(x=>x.iso_639_1==='he')||yt.find(x=>x.type==='Trailer'&&x.official)||yt.find(x=>x.type==='Trailer')||yt[0];return best?'https://www.youtube.com/watch?v='+best.key:null;}
 export async function summary(media:Media,id:number):Promise<Summary>{const d=await detail(media,id);
- return {key:d.key,seasons:d.seasons.map(s=>({n:s.n,count:s.count})),last:d.last,next:d.next,status:d.status,stream:d.providers.stream.map(p=>p.name),release:d.release};}
+ // Airing anime: the exact time of the next episode, from AniList.
+ let airAt:number|null=null;if(d.kind==='anime'&&media==='tv'&&d.next){try{airAt=(await airing([d.en,d.orig],d.next.air))?.at??null;}catch{}}
+ return {key:d.key,seasons:d.seasons.map(s=>({n:s.n,count:s.count})),last:d.last,next:d.next,status:d.status,stream:d.providers.stream.map(p=>p.name),release:d.release,runtime:d.runtime,airAt};}
 export async function season(id:number,n:number){const s=await tmdb<{episodes:{episode_number:number;name:string;air_date?:string;runtime?:number;overview?:string}[]}>('/tv/'+id+'/season/'+n,{},6*3600);
  return s.episodes.map(e=>({e:e.episode_number,name:e.name&&!/^פרק \d+$|^Episode \d+$/.test(e.name)?e.name:'',air:e.air_date||undefined,runtime:e.runtime||null}));}
 export async function cinema(){const [now,soon]=await Promise.all([tmdb<{results:Raw[]}>('/movie/now_playing',{region:'IL'},6*3600),tmdb<{results:Raw[]}>('/movie/upcoming',{region:'IL'},6*3600)]);

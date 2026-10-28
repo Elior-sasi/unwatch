@@ -10,6 +10,6 @@ export async function GET(req:NextRequest){const nk=noKey();if(nk)return nk;cons
  try{return Response.json(await one(key),{headers:PUB(12*3600)});}catch(e){return Response.json({found:false,dub:null,subs:null,offers:[],page:null,error:e instanceof Error?e.message:''},{headers:H});}}
 const body=z.object({keys:z.array(z.string().max(20)).max(60)});
 export async function POST(req:NextRequest){const nk=noKey();if(nk)return nk;let keys:string[]=[];try{keys=body.parse(await req.json()).keys;}catch{return Response.json({error:'בקשה לא תקינה'},{status:400,headers:H});}
- const out:Record<string,{dub:boolean|null;subs:boolean|null;found:boolean}>={};let i=0;
- await Promise.all(Array.from({length:4},async()=>{while(i<keys.length){const k=keys[i++];try{const r=await one(k);out[k]={dub:r.dub,subs:r.subs,found:r.found};}catch{}}}));
+ const out:Record<string,{dub:boolean|null;subs:boolean|null;found:boolean;watch:{service:string;url:string|null}|null}>={};let i=0;
+ await Promise.all(Array.from({length:4},async()=>{while(i<keys.length){const k=keys[i++];try{const r=await one(k);const w=r.offers.find(o=>o.type==='stream'||o.type==='free');out[k]={dub:r.dub,subs:r.subs,found:r.found,watch:w?{service:w.service,url:w.url}:null};}catch{}}}));
  return Response.json({he:out},{headers:H});}

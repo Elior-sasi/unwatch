@@ -11,13 +11,24 @@ type User={name:string;email:string};
 type Tab='up'|'soon'|'cinema'|'lib';
 const TABS:[Tab,string,typeof Play][]=[['up','המשך',Play],['soon','בקרוב',CalendarClock],['cinema','קולנוע',Clapperboard],['lib','הספרייה',Library]];
 const KIND_ICON:Record<Kind,typeof Tv>={anime:Sparkles,tv:Tv,movie:Film};
-const LS={lib:'unwatch:lib',removed:'unwatch:removed',shows:'unwatch:shows',tab:'unwatch:tab',size:'unwatch:size'};
+const LS={filler:'unwatch:filler',spoil:'unwatch:spoil',log:'unwatch:log',lib:'unwatch:lib',removed:'unwatch:removed',shows:'unwatch:shows',tab:'unwatch:tab',size:'unwatch:size'};
 const read=<T,>(k:string,d:T):T=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v) as T:d;}catch{return d;}};
 const write=(k:string,v:unknown)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
 // Latin runs inside Hebrew text keep their order ("Jujutsu Kaisen 2").
 const bidi=(t:string)=>t.replace(/[A-Za-z0-9][A-Za-z0-9 .:\/()+&'"!?-]*[A-Za-z0-9)!?]/g,m=>'⁦'+m+'⁩');
 async function api<T>(url:string,init?:RequestInit):Promise<T>{const r=await fetch(url,init);const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||'שגיאה'),{code:j.code});return j as T;}
 const cmp=(a:{s:number;e:number},b:{s:number;e:number})=>a.s-b.s||a.e-b.e;
+type Fill={filler:number[];mixed:number[];source?:string};
+// Episode number counted from the start of the show (filler lists use these).
+const absOf=(x:{s:number;e:number},seasons:{n:number;count:number}[])=>seasons.filter(z=>z.n>0&&z.n<x.s).reduce((a,z)=>a+z.count,0)+x.e;
+// "Last watched" moved past filler episodes, when the user chose to skip them.
+function skipAt(it:Item,sum:Summary,fill?:Fill|null){let at=it.at;if(!it.skipFiller||!fill?.filler.length)return at;const f=new Set(fill.filler);let nx=after(at,sum.seasons);let g=0;
+ while(nx&&f.has(absOf(nx,sum.seasons))&&g++<3000){at=nx;nx=after(nx,sum.seasons);}return at;}
+const timeIL=(ms:number)=>new Date(ms).toLocaleTimeString('he-IL',{hour:'2-digit',minute:'2-digit',timeZone:'Asia/Jerusalem'});
+const dateIL=(ms:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem'}).format(ms);
+const dur=(m:number)=>{m=Math.round(m);if(m<60)return m+' דק׳';const h=Math.floor(m/60),r=m%60;return (h===1?'שעה':h===2?'שעתיים':h+' שעות')+(r?' ו-'+r+' דק׳':'');};
+type Log={k:string;t:number;min:number;kind:Kind;n:number;title:string};
+const logWatch=(it:Item,min:number,n=1)=>{const l=read<Log[]>(LS.log,[]);l.push({k:it.key,t:Date.now(),min:Math.round(min),kind:it.kind,n,title:it.title});write(LS.log,l.slice(-6000));};
 const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 
 export function Mark({className}:{className?:string}){return <svg className={className} viewBox="40 40 100 110" aria-hidden="true">
@@ -43,10 +54,11 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
  const [ready,setReady]=useState(false);const [tab,setTab]=useState<Tab>('up');const [size,setSize]=useState('');
  const [openKey,setOpenKey]=useState<string|null>(null);const [hit,setHit]=useState<Hit|null>(null);const [searching,setSearching]=useState(false);const [settings,setSettings]=useState(false);
  const [toast,setToast]=useState<{text:string;undo?:()=>void}|null>(null);const [status,setStatus]=useState<{tmdb:boolean;db:boolean}|null>(null);
+ const [fills,setFills]=useState<Record<string,Fill>>({});const [spoil,setSpoil]=useState(true);const [freeMin,setFreeMin]=useState(0);const [stats,setStats]=useState(false);
  const [splash,setSplash]=useState(2);const [syncing,setSyncing]=useState(false);
  const synced=useRef(false);const pending=useRef<ReturnType<typeof setTimeout>|null>(null);
 
- useEffect(()=>{setItems(read(LS.lib,[]));setRemoved(read(LS.removed,{}));setShows(read(LS.shows,{}));setTab(read(LS.tab,'up'));setSize(read(LS.size,''));setReady(true);
+ useEffect(()=>{setItems(read(LS.lib,[]));setRemoved(read(LS.removed,{}));setShows(read(LS.shows,{}));setTab(read(LS.tab,'up'));setSize(read(LS.size,''));setFills(read(LS.filler,{}));setSpoil(read(LS.spoil,true));setReady(true);
   const quick=matchMedia('(prefers-reduced-motion: reduce)').matches;setTimeout(()=>setSplash(0),quick?500:2500);
   api<{tmdb:boolean;db:boolean}>('/api/status').then(setStatus).catch(()=>{});},[]);
  useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(null),5000);return ()=>clearTimeout(t);},[toast]);
@@ -72,8 +84,8 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
  // Hebrew dubbing / subtitles for the whole library, checked in the background once a week per title.
  const heBusy=useRef(false);
  const loadHe=useCallback(async()=>{if(heBusy.current)return;const keys=read<Item[]>(LS.lib,[]).filter(i=>!i.he||Date.now()-i.he.at>7*864e5).map(i=>i.key).slice(0,40);if(!keys.length)return;heBusy.current=true;
-  try{const r=await api<{he:Record<string,{dub:boolean|null;subs:boolean|null}>}>('/api/he',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({keys})});const now=Date.now();
-   commit(l=>l.map(i=>r.he[i.key]?{...i,he:{dub:r.he[i.key].dub,subs:r.he[i.key].subs,at:now}}:keys.includes(i.key)?{...i,he:{dub:i.he?.dub??null,subs:i.he?.subs??null,at:now}}:i));}catch{}finally{heBusy.current=false;}},[commit]);
+  try{const r=await api<{he:Record<string,{dub:boolean|null;subs:boolean|null;watch:{service:string;url:string|null}|null}>}>('/api/he',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({keys})});const now=Date.now();
+   commit(l=>l.map(i=>r.he[i.key]?{...i,he:{dub:r.he[i.key].dub,subs:r.he[i.key].subs,at:now},...(!i.watchOn&&r.he[i.key].watch?{watchOn:r.he[i.key].watch!}:{})}:keys.includes(i.key)?{...i,he:{dub:i.he?.dub??null,subs:i.he?.subs??null,at:now}}:i));}catch{}finally{heBusy.current=false;}},[commit]);
  useEffect(()=>{if(ready&&status?.tmdb)loadHe();},[ready,items.length,status,loadHe]);
  // Pull down at the top of the page to refresh.
  const [pull,setPull]=useState(0);const startY=useRef<number|null>(null);
@@ -82,19 +94,21 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
 
  const goTab=(t:Tab)=>{setTab(t);write(LS.tab,t);window.scrollTo({top:0});};
  const open=(key:string,h?:Hit|null)=>{setHit(h||null);setOpenKey(key);};
- const markNext=(it:Item)=>{const sum=shows[it.key];if(!sum)return;const nx=after(it.at,sum.seasons);if(!nx)return;
+ const markNext=(it:Item,together=false)=>{const sum=shows[it.key];if(!sum)return;const nx=after(skipAt(it,sum,fills[it.key]),sum.seasons);if(!nx)return;logWatch(it,sum.runtime||24);
+  if(together&&it.together?.on){const t=it.together;upsert({...it,at:it.at&&cmp(it.at,nx)>=0?it.at:nx,mid:null,together:{...t,at:nx},status:it.status==='plan'?'watching':it.status,watchedAt:Date.now()});
+   setToast({text:'צפיתם יחד: '+epLabel(nx,sum.seasons.length),undo:()=>upsert(it)});return;}
   const more=after(nx,sum.seasons);const ended=!more&&/הסתיימה|בוטלה/.test(sum.status);
   upsert({...it,at:nx,mid:null,status:ended?'done':it.status==='plan'?'watching':it.status,watchedAt:Date.now()});
   setToast({text:'סומן: '+epLabel(nx,sum.seasons.length)+(ended?' - סיימת את הסדרה':''),undo:()=>upsert(it)});};
 
  const byKey=useMemo(()=>new Map(items.map(i=>[i.key,i])),[items]);
- const ups=useMemo(()=>items.filter(i=>i.media==='tv'&&(i.status==='watching')).map(i=>({it:i,up:shows[i.key]?upNext(i,shows[i.key]):null})),[items,shows]);
+ const ups=useMemo(()=>items.filter(i=>i.media==='tv'&&(i.status==='watching')).map(i=>({it:i,up:shows[i.key]?upNext({at:skipAt(i,shows[i.key],fills[i.key])},shows[i.key]):null})),[items,shows,fills]);
  const readyCount=ups.filter(x=>x.up?.state==='ready').length;
  const toWatch=[...ups].sort((a,b)=>{const r=(u:Up|null)=>u?.state==='ready'?0:u?.state==='wait'?1:2;return r(a.up)-r(b.up)||b.it.updated-a.it.updated;});
  const midMovies=items.filter(i=>i.media==='movie'&&i.status==='watching');
  const soon=useMemo(()=>{const t=todayISO();const out:{date:string;it:Item;label:string}[]=[];
   for(const it of items){if(it.status==='dropped')continue;const s=shows[it.key];
-   if(it.media==='tv'&&s?.next?.air&&s.next.air>=t)out.push({date:s.next.air,it,label:epLabel(s.next,s.seasons.length)+(s.next.e===1?' - עונה חדשה':'')});
+   if(it.media==='tv'&&s?.next?.air&&s.next.air>=t){const d=s.airAt?dateIL(s.airAt):s.next.air;out.push({date:d,it,label:epLabel(s.next,s.seasons.length)+(s.next.e===1?' - עונה חדשה':'')+(s.airAt?' · ב-'+timeIL(s.airAt):'')});}
    if(it.media==='movie'&&it.status==='plan'){const d=s?.release;if(d&&d>=t)out.push({date:d,it,label:'יוצא'});}}
   return out.sort((a,b)=>a.date.localeCompare(b.date));},[items,shows]);
 
@@ -117,17 +131,23 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
    <h1 id="h-up">ממשיכים לצפות</h1>
    <p className="sub">{readyCount?readyCount===1?'סדרה אחת מחכה לך':readyCount+' סדרות מחכות לך':ups.length?'אין פרקים חדשים כרגע':''}</p>
    {ready&&!ups.length&&!midMovies.length&&<div className="empty"><Play aria-hidden="true"/><p>עוד אין כאן כלום. חפש אנימה, סדרה או סרט וסמן "אני צופה".</p><button className="primary" style={{flex:"none",minWidth:200}} onClick={()=>setSearching(true)}><Search aria-hidden="true"/>חיפוש</button></div>}
+   {ups.length+items.filter(i=>i.media==='movie'&&i.status==='plan').length>0&&<div className="chips" role="group" aria-label="כמה זמן יש לך"><span className="chipLbl">יש לי:</span>{[25,45,90,150].map(m=><button key={m} className="chip" aria-pressed={freeMin===m} onClick={()=>setFreeMin(freeMin===m?0:m)}>{dur(m)}</button>)}</div>}
+   {freeMin>0&&<FreeTime min={freeMin} ups={toWatch} shows={shows} movies={items.filter(i=>i.media==='movie'&&i.status==='plan')} open={open}/>}
    <ul className="list">{toWatch.map(({it,up},i)=>{const s=shows[it.key];return <li key={it.key} className="card rise" style={{'--i':i} as React.CSSProperties}>
     <button className="open" onClick={()=>open(it.key)} aria-label={it.title+', פרטים'}><Poster src={it.poster} kind={it.kind}/><div className="info"><div className="nm" dir="auto">{bidi(it.title)}</div>
      <div className="meta"><KindPill kind={it.kind}/><HePills it={it}/></div>
-     <div className="next" key={up?.state==="ready"||up?.state==="wait"?up.ep.s+"-"+up.ep.e:up?.state||"x"}>{!up?<span className="shim" aria-label="טוען"/>:up.state==='ready'?<>הבא: {epLabel(up.ep,s.seasons.length)}{up.left>1&&<small>{up.left} פרקים מחכים</small>}</>:up.state==='wait'?<>{epLabel(up.ep,s.seasons.length)}<small>{up.air?'יוצא '+whenText(up.air):'עוד אין תאריך'}</small></>:up.state==='caught'?<>ראית הכל<small>{up.air?'הפרק הבא '+whenText(up.air):'מחכים לפרקים חדשים'}</small></>:<>ראית הכל<small>הסדרה הסתיימה</small></>}
-      {it.mid&&<small><Clock size={14} aria-hidden="true"/> עצרת ב{epLabel(it.mid,s?.seasons.length||1)}, דקה {it.mid.min}</small>}</div></div></button>
-    {up?.state==='ready'&&<div className="do"><button className="primary press" onClick={e=>{e.currentTarget.classList.remove('pop');void e.currentTarget.offsetWidth;e.currentTarget.classList.add('pop');markNext(it);}}><Check aria-hidden="true"/>צפיתי ב{epLabel(up.ep,s.seasons.length)}</button></div>}
+     <div className="next" key={up?.state==="ready"||up?.state==="wait"?up.ep.s+"-"+up.ep.e:up?.state||"x"}>{!up?<span className="shim" aria-label="טוען"/>:up.state==='ready'?<>הבא: {epLabel(up.ep,s.seasons.length)}{up.left>1&&<small>{up.left} פרקים מחכים</small>}</>:up.state==='wait'?<>{epLabel(up.ep,s.seasons.length)}<small>{s.airAt?'יוצא '+whenText(dateIL(s.airAt))+' ב-'+timeIL(s.airAt):up.air?'יוצא '+whenText(up.air):'עוד אין תאריך'}</small></>:up.state==='caught'?<>ראית הכל<small>{s.airAt?'הפרק הבא '+whenText(dateIL(s.airAt))+' ב-'+timeIL(s.airAt):up.air?'הפרק הבא '+whenText(up.air):'מחכים לפרקים חדשים'}</small></>:<>ראית הכל<small>הסדרה הסתיימה</small></>}
+      {it.mid&&<small><Clock size={14} aria-hidden="true"/> עצרת ב{epLabel(it.mid,s?.seasons.length||1)}, דקה {it.mid.min}</small>}
+      {up?.state==='ready'&&up.left>1&&s.runtime?<small>עוד {dur(up.left*s.runtime)} עד שתשלים</small>:null}
+      {it.together?.on&&s&&<small><Users size={14} aria-hidden="true"/> עם {it.together.name||'מישהו'}: {(()=>{const t=after(it.together.at,s.seasons);return t?'הבא '+epLabel(t,s.seasons.length):'סיימתם';})()}</small>}</div></div></button>
+    {up?.state==='ready'&&<div className="do"><button className="primary press" onClick={e=>{e.currentTarget.classList.remove('pop');void e.currentTarget.offsetWidth;e.currentTarget.classList.add('pop');markNext(it);}}><Check aria-hidden="true"/>צפיתי ב{epLabel(up.ep,s.seasons.length)}</button>
+     {it.together?.on&&<button className="ghost press" style={{flex:1}} onClick={()=>markNext(it,true)}><Users aria-hidden="true"/>צפינו יחד</button>}</div>}
+    {it.watchOn?.url&&<a className="ghost full watch" href={it.watchOn.url} target="_blank" rel="noopener noreferrer"><Play aria-hidden="true"/>לצפייה ב-{it.watchOn.service}<span className="sr"> (נפתח בשירות)</span></a>}
     {up?.state==='ended'&&<div className="do"><button className="ghost" style={{flex:1}} onClick={()=>upsert({...it,status:'done'})}>להעביר לסיימתי</button></div>}
    </li>;})}
    {midMovies.map(it=><li key={it.key} className="card"><button className="open" onClick={()=>open(it.key)} aria-label={it.title+', פרטים'}><Poster src={it.poster} kind={it.kind}/><div className="info"><div className="nm" dir="auto">{bidi(it.title)}</div>
     <div className="meta"><KindPill kind={it.kind}/></div><div className="next">{it.mid?'עצרת בדקה '+it.mid.min:'באמצע'}</div></div></button>
-    <div className="do"><button className="primary" onClick={()=>{upsert({...it,status:'done',mid:null,watchedAt:Date.now()});setToast({text:'סיימת: '+it.title,undo:()=>upsert(it)});}}><Check aria-hidden="true"/>סיימתי</button></div></li>)}</ul>
+    <div className="do"><button className="primary" onClick={()=>{logWatch(it,shows[it.key]?.runtime||100);upsert({...it,status:'done',mid:null,watchedAt:Date.now()});setToast({text:'סיימת: '+it.title,undo:()=>upsert(it)});}}><Check aria-hidden="true"/>סיימתי</button></div></li>)}</ul>
    {items.some(i=>i.status==='plan')&&<button className="ghost full" onClick={()=>goTab('lib')}>ברשימה לצפייה: {items.filter(i=>i.status==='plan').length}</button>}
   </section>}
 
@@ -139,7 +159,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
 
   {tab==='cinema'&&<Cinema open={open} byKey={byKey}/>}
 
-  {tab==='lib'&&<Lib items={items} shows={shows} open={open}/>}
+  {tab==='lib'&&<Lib items={items} shows={shows} open={open} stats={()=>setStats(true)}/>}
 
   <nav ref={navRef} aria-label="ניווט ראשי" className={drag!==null?'dragging':''} style={{'--tab':drag??TABS.findIndex(t=>t[0]===tab)} as React.CSSProperties}
    onTouchStart={e=>slide(e.touches[0].clientX,false)} onTouchMove={e=>slide(e.touches[0].clientX,false)} onTouchEnd={e=>slide(e.changedTouches[0].clientX,true)} onTouchCancel={()=>setDrag(null)}>
@@ -148,8 +168,9 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
   </nav>
 
   {searching&&<SearchSheet close={()=>setSearching(false)} open={open} byKey={byKey}/>}
-  {openKey&&<DetailSheet key={openKey} k={openKey} hit={hit} item={byKey.get(openKey)||null} close={()=>setOpenKey(null)} save={upsert} remove={k=>{remove(k);}} onSeen={()=>loadShows(true)} openOther={h=>open(h.key,h)}/>}
-  {settings&&<SettingsSheet close={()=>setSettings(false)} size={size} setSize={v=>{setSize(v);write(LS.size,v);}} user={user} canLogin={canLogin} login={login} logout={logout} status={status} syncing={syncing} sync={sync}
+  {openKey&&<DetailSheet key={openKey} k={openKey} hit={hit} item={byKey.get(openKey)||null} close={()=>setOpenKey(null)} save={upsert} remove={k=>{remove(k);}} onSeen={()=>loadShows(true)} openOther={h=>open(h.key,h)} spoil={spoil} fill={fills[openKey]||null} setFill={f=>{const n={...read<Record<string,Fill>>(LS.filler,{}),[openKey]:f};write(LS.filler,n);setFills(n);}} onLog={(it,min,n)=>logWatch(it,min,n)}/>}
+  {stats&&<StatsSheet close={()=>setStats(false)} items={items} shows={shows}/>}
+  {settings&&<SettingsSheet spoil={spoil} setSpoil={v=>{setSpoil(v);write(LS.spoil,v);}} close={()=>setSettings(false)} size={size} setSize={v=>{setSize(v);write(LS.size,v);}} user={user} canLogin={canLogin} login={login} logout={logout} status={status} syncing={syncing} sync={sync}
    items={items} restore={list=>{commit(l=>merge(l,list,removed));setToast({text:'השחזור הושלם'});}}/>}
   <div aria-live="polite" key={toast?.text||''} className={toast?'toast':'sr'}>{toast&&<>{toast.text}{toast.undo&&<button onClick={()=>{toast.undo!();setToast(null);}}>ביטול</button>}</>}</div>
  </main>;}
@@ -165,10 +186,10 @@ function Cinema({open,byKey}:{open:(k:string,h?:Hit)=>void;byKey:Map<string,Item
   {seen.length>0&&<><h2 className="sec">ראיתי בקולנוע</h2><div>{seen.map(i=><button key={i.key} className="line" style={{marginTop:8}} onClick={()=>open(i.key)}><Poster src={i.poster} kind={i.kind}/><span className="info"><span className="nm" dir="auto">{bidi(i.title)}</span><span className="meta">{i.watchedAt?new Date(i.watchedAt).toLocaleDateString('he-IL'):''}</span></span></button>)}</div></>}
  </section>;}
 
-function Lib({items,shows,open}:{items:Item[];shows:Record<string,Summary>;open:(k:string)=>void}){const [kind,setKind]=useState<Kind|''>('');const [st,setSt]=useState<Status|''>('');const [he,setHe]=useState<''|'dub'|'subs'>('');const [q,setQ]=useState('');
+function Lib({items,shows,open,stats}:{items:Item[];shows:Record<string,Summary>;open:(k:string)=>void;stats:()=>void}){const [kind,setKind]=useState<Kind|''>('');const [st,setSt]=useState<Status|''>('');const [he,setHe]=useState<''|'dub'|'subs'>('');const [q,setQ]=useState('');
  const list=items.filter(i=>(!kind||i.kind===kind)&&(!st||i.status===st)&&(!he||(he==='dub'?dubOf(i):subsOf(i)))&&(!q||(i.title+' '+i.orig).toLowerCase().includes(q.toLowerCase()))).sort((a,b)=>b.updated-a.updated);
  const count=(k:Kind)=>items.filter(i=>i.kind===k).length;
- return <section className="tabIn" aria-labelledby="h-lib"><h1 id="h-lib">הספרייה</h1><p className="sub">{items.length} כותרים</p>
+ return <section className="tabIn" aria-labelledby="h-lib"><h1 id="h-lib">הספרייה</h1><p className="sub">{items.length} כותרים</p>{items.length>0&&<button className="ghost full" onClick={stats}><Sparkles aria-hidden="true"/>הסיכום שלי</button>}
   <div className="chips" role="group" aria-label="סוג"><button className="chip" aria-pressed={!kind} onClick={()=>setKind('')}>הכל</button>{(['anime','tv','movie'] as Kind[]).map(k=><button key={k} className="chip" aria-pressed={kind===k} onClick={()=>setKind(kind===k?'':k)}>{k==='anime'?'אנימה':k==='tv'?'סדרות':'סרטים'} <b>{count(k)}</b></button>)}</div>
   <div className="chips" role="group" aria-label="מצב">{(Object.keys(STATUS_LABEL) as Status[]).map(s=><button key={s} className="chip" aria-pressed={st===s} onClick={()=>setSt(st===s?'':s)}>{STATUS_LABEL[s]}</button>)}<button className="chip" aria-pressed={he==='dub'} onClick={()=>setHe(he==='dub'?'':'dub')}><Mic size={16} aria-hidden="true"/>דיבוב</button><button className="chip" aria-pressed={he==='subs'} onClick={()=>setHe(he==='subs'?'':'subs')}><Captions size={16} aria-hidden="true"/>כתוביות</button></div>
   {items.length>6&&<label className="search"><Search size={20} aria-hidden="true"/><span className="sr">חיפוש בספרייה</span><input value={q} onChange={e=>setQ(e.target.value)} placeholder="חיפוש בספרייה" enterKeyHint="search"/></label>}
@@ -194,7 +215,7 @@ function Tri({label,icon:I,value,set}:{label:string;icon:typeof Mic;value:boolea
  <div className="setNote" style={{display:'flex',alignItems:'center',gap:6,margin:'0 0 6px'}}><I size={18} aria-hidden="true"/><span id={id}>{label}</span></div>
  <div className="seg" role="group" aria-labelledby={id}>{([[null,'אוטומטי'],[true,'יש'],[false,'אין']] as const).map(([v,t])=><button key={t} aria-pressed={value===v} onClick={()=>set(v)}>{t}</button>)}</div></div>;}
 
-function DetailSheet({k,hit,item,close,save,remove,onSeen,openOther}:{k:string;hit:Hit|null;item:Item|null;close:()=>void;save:(x:Item)=>void;remove:(k:string)=>void;onSeen:()=>void;openOther:(h:Hit)=>void}){
+function DetailSheet({k,hit,item,close,save,remove,onSeen,openOther,spoil,fill,setFill,onLog}:{k:string;hit:Hit|null;item:Item|null;close:()=>void;save:(x:Item)=>void;remove:(k:string)=>void;onSeen:()=>void;openOther:(h:Hit)=>void;spoil:boolean;fill:Fill|null;setFill:(f:Fill)=>void;onLog:(it:Item,min:number,n:number)=>void}){
  const ref=useSheet(close);const [d,setD]=useState<Detail|null>(null);const [err,setErr]=useState('');const [eps,setEps]=useState<Record<number,{e:number;name:string;air?:string;runtime:number|null}[]>>({});
  const [heI,setHeI]=useState<HeInfo|null>(null);
  useEffect(()=>{api<Detail>('/api/title?key='+encodeURIComponent(k)).then(setD).catch(e=>setErr(e.message));api<HeInfo>('/api/he?key='+encodeURIComponent(k)).then(setHeI).catch(()=>setHeI({found:false,dub:null,subs:null,offers:[],page:null}));},[k]);
@@ -204,6 +225,10 @@ function DetailSheet({k,hit,item,close,save,remove,onSeen,openOther}:{k:string;h
  const seasons=d?.seasons||[];const nSeasons=seasons.length;
  const loadSeason=(n:number)=>{if(eps[n]||!base)return;api<{episodes:{e:number;name:string;air?:string;runtime:number|null}[]}>('/api/season?id='+base.tmdb+'&n='+n).then(r=>setEps(x=>({...x,[n]:r.episodes}))).catch(()=>{});};
  const at=item?.at||null;const nx=after(at,seasons.map(s=>({n:s.n,count:s.count})));
+ const [shown,setShown]=useState<Record<number,boolean>>({});const [mate,setMate]=useState(item?.together?.name||'');
+ useEffect(()=>{if(kind==='anime'&&media==='tv'&&d&&!fill)api<Fill>('/api/filler?key='+encodeURIComponent(k)).then(f=>{if(f.filler.length||f.mixed.length)setFill(f);}).catch(()=>{});},[kind,media,d,fill,k,setFill]);
+ const fSet=new Set(fill?.filler||[]);const mSet=new Set(fill?.mixed||[]);
+ const total=seasons.reduce((a,z)=>a+z.count,0);const seen=at?absOf(at,seasons):0;const left=Math.max(0,total-seen-(item?.skipFiller?[...fSet].filter(n=>n>seen).length:0));
  const today=todayISO();const [midMin,setMidMin]=useState(String(item?.mid?.min||''));
  return <div className="sheet" role="dialog" aria-modal="true" aria-label={title||'פרטים'}>
   <div className="sheetTop"><span/><button ref={ref} className="ib" aria-label="סגירה" onClick={close}><X/></button></div>
@@ -219,9 +244,9 @@ function DetailSheet({k,hit,item,close,save,remove,onSeen,openOther}:{k:string;h
    {media==='movie'&&base.release&&base.release>=today&&<p className="setNote"><Ticket size={16} aria-hidden="true"/> בקולנוע בישראל: {whenText(base.release)}</p>}
 
    {!item?<div className="do" style={{flexWrap:'wrap'}}>
-     <button className="primary" onClick={()=>set({status:media==='movie'?'done':'watching',...(media==='movie'?{watchedAt:Date.now()}:{})})}>{media==='movie'?<><Check aria-hidden="true"/>ראיתי</>:<><Play aria-hidden="true"/>אני צופה</>}</button>
+     <button className="primary" onClick={()=>{if(media==='movie')onLog(make('done'),d?.runtime||100,1);set({status:media==='movie'?'done':'watching',...(media==='movie'?{watchedAt:Date.now()}:{})});}}>{media==='movie'?<><Check aria-hidden="true"/>ראיתי</>:<><Play aria-hidden="true"/>אני צופה</>}</button>
      <button className="ghost" style={{flex:1}} onClick={()=>set({status:'plan'})}><Plus aria-hidden="true"/>לרשימה</button>
-     {media==='movie'&&<button className="ghost full" onClick={()=>set({status:'done',watchedAt:Date.now(),source:'cinema'})}><Ticket aria-hidden="true"/>ראיתי בקולנוע</button>}</div>
+     {media==='movie'&&<button className="ghost full" onClick={()=>{onLog(make('done'),d?.runtime||100,1);set({status:'done',watchedAt:Date.now(),source:'cinema'});}}><Ticket aria-hidden="true"/>ראיתי בקולנוע</button>}</div>
    :<section className="set" aria-labelledby="h-st"><h3 id="h-st">מצב</h3><div className="seg" role="group" aria-labelledby="h-st">{(Object.keys(STATUS_LABEL) as Status[]).map(s=><button key={s} aria-pressed={item.status===s} onClick={()=>set({status:s,...(s==='done'&&media==='movie'&&!item.watchedAt?{watchedAt:Date.now()}:{})})}>{STATUS_LABEL[s]}</button>)}</div>
      {(item.status==='done'||item.status==='dropped')&&<div style={{marginTop:12}}><p className="setNote" id="h-rate" style={{margin:'0 0 6px'}}>דירוג</p><div className="stars" role="group" aria-labelledby="h-rate">{[1,2,3,4,5].map(n=><button key={n} aria-label={n+' כוכבים'} aria-pressed={(item.rating||0)>=n*2} onClick={()=>set({rating:item.rating===n*2?null:n*2})}><Star aria-hidden="true"/></button>)}</div></div>}
      {media==='movie'&&item.status==='done'&&<button className="ghost full" aria-pressed={item.source==='cinema'} onClick={()=>set({source:item.source==='cinema'?undefined:'cinema'})}><Ticket aria-hidden="true"/>{item.source==='cinema'?'ראיתי בקולנוע ✓':'ראיתי בקולנוע'}</button>}</section>}
@@ -229,23 +254,32 @@ function DetailSheet({k,hit,item,close,save,remove,onSeen,openOther}:{k:string;h
    {item&&media==='tv'&&nSeasons>0&&<section className="set" aria-labelledby="h-at"><h3 id="h-at"><Pause aria-hidden="true"/>איפה עצרתי</h3>
     <div className="step"><button className="ib" aria-label="פרק אחד אחורה" disabled={!at} onClick={()=>set({at:at?before(at,seasons):null,mid:null})}><Minus/></button>
      <b aria-live="polite">{at?'ראיתי עד '+epLabel(at,nSeasons):'עוד לא התחלתי'}</b>
-     <button className="ib" aria-label="צפיתי בפרק הבא" disabled={!nx} onClick={()=>set({at:nx,mid:null,status:item.status==='plan'?'watching':item.status,watchedAt:Date.now()})}><Plus/></button></div>
+     <button className="ib" aria-label="צפיתי בפרק הבא" disabled={!nx} onClick={()=>{onLog(item,d?.runtime||24,1);set({at:nx,mid:null,status:item.status==='plan'?'watching':item.status,watchedAt:Date.now()});}}><Plus/></button></div>
+    {total>0&&<p className="setNote" style={{textAlign:'center'}}>{left?'נשארו '+left+' פרקים'+(d?.runtime?' · בערך '+dur(left*d.runtime):''):'ראית את כל הפרקים'}</p>}
+    {fill&&fill.filler.length>0&&<div className="fillBox"><label className="swRow"><span><b>לדלג על פילרים</b><small>{fill.filler.length} פרקי פילר{fill.mixed.length?' ו-'+fill.mixed.length+' חלקיים':''}</small></span><input type="checkbox" role="switch" className="sw" checked={!!item.skipFiller} onChange={e=>set({skipFiller:e.target.checked})}/></label>
+     {fill.source&&<a className="setNote" href={fill.source} target="_blank" rel="noopener noreferrer">המקור: Anime Filler List</a>}</div>}
     {nx&&<label className="field">עצרתי באמצע {epLabel(nx,nSeasons)}, בדקה:<input inputMode="numeric" pattern="[0-9]*" value={midMin} onChange={e=>setMidMin(e.target.value.replace(/\D/g,'').slice(0,3))}
      onBlur={()=>set({mid:midMin?{s:nx.s,e:nx.e,min:+midMin}:null})} placeholder="למשל 14"/></label>}
     {seasons.map(s=><details key={s.n} className="fold" onToggle={e=>{if((e.target as HTMLDetailsElement).open)loadSeason(s.n);}}><summary><span>{nSeasons>1?'עונה '+s.n:'פרקים'} <span className="setNote" style={{display:'inline'}}>· {s.count} פרקים</span></span><ChevronDown size={20} aria-hidden="true"/></summary>
-     <div>{!eps[s.n]?<p className="setNote" role="status">טוען…</p>:<ul className="eps">{eps[s.n].map(e=>{const pos={s:s.n,e:e.e};const w=!!at&&cmp(pos,at)<=0;const out=!e.air||e.air<=today;
+     <div>{spoil&&eps[s.n]&&!shown[s.n]&&<button className="ghost full" style={{marginTop:0,marginBottom:8}} onClick={()=>setShown(x=>({...x,[s.n]:true}))}>להציג שמות של פרקים שלא ראיתי</button>}{!eps[s.n]?<p className="setNote" role="status">טוען…</p>:<ul className="eps">{eps[s.n].map(e=>{const pos={s:s.n,e:e.e};const w=!!at&&cmp(pos,at)<=0;const out=!e.air||e.air<=today;
       return <li key={e.e}><button className={w?'on':''} aria-pressed={w} disabled={!out&&!w} onClick={()=>set({at:w&&at&&cmp(pos,at)===0?before(pos,seasons):pos,mid:null,status:item.status==='plan'?'watching':item.status,watchedAt:Date.now()})}
-       aria-label={'פרק '+e.e+(e.name?', '+e.name:'')+(w?', נצפה':'')+(!out&&e.air?', יוצא '+whenText(e.air):'')}>
-       <span className="ck">{w&&<Check aria-hidden="true"/>}</span><span className="t"><span dir="auto">{e.e}. {e.name?bidi(e.name):'פרק '+e.e}</span><small>{e.air?(out?new Date(e.air+'T00:00').toLocaleDateString('he-IL'):'יוצא '+whenText(e.air)):''}{e.runtime?' · '+e.runtime+' דק׳':''}</small></span></button></li>;})}</ul>}</div></details>)}
+       aria-label={'פרק '+e.e+(e.name&&(w||!spoil||shown[s.n])?', '+e.name:'')+(fSet.has(absOf(pos,seasons))?', פילר':'')+(w?', נצפה':'')+(!out&&e.air?', יוצא '+whenText(e.air):'')}>
+       <span className="ck">{w&&<Check aria-hidden="true"/>}</span><span className="t"><span dir="auto">{e.e}. {e.name&&(w||!spoil||shown[s.n])?bidi(e.name):e.name?<span className="hid">שם מוסתר</span>:'פרק '+e.e}{fSet.has(absOf(pos,seasons))?<span className="pill dim"> פילר</span>:mSet.has(absOf(pos,seasons))?<span className="pill dim"> חלקי</span>:null}</span><small>{e.air?(out?new Date(e.air+'T00:00').toLocaleDateString('he-IL'):'יוצא '+whenText(e.air)):''}{e.runtime?' · '+e.runtime+' דק׳':''}</small></span></button></li>;})}</ul>}</div></details>)}
    </section>}
    {item&&media==='movie'&&item.status==='watching'&&<section className="set"><h3><Pause aria-hidden="true"/>איפה עצרתי</h3><label className="field">עצרתי בדקה:<input inputMode="numeric" pattern="[0-9]*" value={midMin} onChange={e=>setMidMin(e.target.value.replace(/\D/g,'').slice(0,3))} onBlur={()=>set({mid:midMin?{s:0,e:0,min:+midMin}:null})} placeholder="למשל 40"/></label></section>}
 
+   {item&&media==='tv'&&<section className="set"><label className="swRow"><span><b><Users size={18} aria-hidden="true"/> צפייה משותפת</b><small>התקדמות נפרדת למה שרואים יחד</small></span><input type="checkbox" role="switch" className="sw" checked={!!item.together?.on} onChange={e=>set({together:{on:e.target.checked,name:item.together?.name||mate,at:item.together?.at||null}})}/></label>
+    {item.together?.on&&<><label className="field">עם מי?<input value={mate} onChange={e=>setMate(e.target.value.slice(0,40))} onBlur={()=>set({together:{...item.together!,name:mate.trim()}})} placeholder="למשל אסיף"/></label>
+     <div className="step"><button className="ib" aria-label="פרק משותף אחד אחורה" disabled={!item.together.at} onClick={()=>set({together:{...item.together!,at:item.together!.at?before(item.together!.at,seasons):null}})}><Minus/></button>
+      <b aria-live="polite">{item.together.at?'יחד עד '+epLabel(item.together.at,nSeasons):'עוד לא התחלתם יחד'}</b>
+      <button className="ib" aria-label="צפינו יחד בפרק הבא" disabled={!after(item.together.at,seasons)} onClick={()=>{const t=after(item.together!.at,seasons);if(t){onLog(item,d?.runtime||24,1);set({together:{...item.together!,at:t},at:item.at&&cmp(item.at,t)>=0?item.at:t});}}}><Plus/></button></div></>}
+   </section>}
    <section className="set" aria-labelledby="h-he"><h3 id="h-he"><Languages aria-hidden="true"/>בעברית ואיפה לראות</h3>
     {!heI?<p className="setNote" role="status">בודק דיבוב וכתוביות…</p>:<>
      <div className="yn"><div><Mic aria-hidden="true"/><span>דיבוב לעברית</span><b className={heI.dub?'y':''}>{yn(item?.dub??heI.dub)}</b></div><div><Captions aria-hidden="true"/><span>כתוביות בעברית</span><b className={heI.subs?'y':''}>{yn(item?.subs??heI.subs)}</b></div></div>
      {heI.offers.length>0?<ul className="offers">{heI.offers.map(o=><li key={o.service+o.type}><a className="offer" href={o.url||heI.page||'#'} target="_blank" rel="noopener noreferrer" aria-label={o.service+', '+OFFER_TYPE[o.type]+'. דיבוב לעברית: '+(o.audio.length?(o.dub?'יש':'אין'):'לא ידוע')+'. כתוביות בעברית: '+(o.subs.length?(o.heSubs?'יש':'אין'):'לא ידוע')+'. נפתח בשירות'}>
        {o.icon?<img src={o.icon} alt=""/>:<Tv aria-hidden="true"/>}<span className="t"><b>{o.service}</b><small>{OFFER_TYPE[o.type]}{o.audio.length?' · שמע: '+o.audio.map(l=>LANG_HE[l.slice(0,2)]||l).join(', '):''}</small>
-       <span className="tags">{o.dub&&<span className="pill ok"><Mic aria-hidden="true"/>דיבוב</span>}{o.heSubs&&<span className="pill ok"><Captions aria-hidden="true"/>כתוביות</span>}{!o.audio.length&&!o.subs.length&&<span className="pill dim">שפות לא ידועות</span>}</span></span><ExternalLink size={18} aria-hidden="true"/></a></li>)}</ul>
+       <span className="tags">{o.dub&&<span className="pill ok"><Mic aria-hidden="true"/>דיבוב</span>}{o.heSubs&&<span className="pill ok"><Captions aria-hidden="true"/>כתוביות</span>}{!o.audio.length&&!o.subs.length&&<span className="pill dim">שפות לא ידועות</span>}</span></span><ExternalLink size={18} aria-hidden="true"/></a>{item&&(o.type==='stream'||o.type==='free')&&<button className="mine" aria-pressed={item.watchOn?.service===o.service} onClick={()=>set({watchOn:item.watchOn?.service===o.service?undefined:{service:o.service,url:o.url||heI.page}})}>{item.watchOn?.service===o.service?'✓ כאן אני רואה':'אני רואה כאן'}</button>}</li>)}</ul>
      :d&&d.providers.stream.length?<><p className="setNote" style={{margin:'10px 0 4px'}}>בסטרימינג בישראל:</p><div className="prov">{d.providers.stream.map(p=><span key={p.name}>{p.logo&&<img src={p.logo} alt=""/>}{p.name}</span>)}</div></>
      :<p className="setNote">{media==='movie'&&base.release&&daysTo(base.release)>-120?'עכשיו רק בקולנוע - עוד לא זמין בשירותי צפייה בישראל.':'לא נמצא בשירותי צפייה בישראל (נטפליקס, דיסני+, פריים וידאו, Apple TV, yes, HOT ועוד).'}</p>}
      {heI.offers.length>0&&heI.dub===null&&heI.subs===null&&<p className="setNote">השירותים לא פרסמו אילו שפות יש. אפשר לסמן ידנית.</p>}</>}
@@ -258,11 +292,12 @@ function DetailSheet({k,hit,item,close,save,remove,onSeen,openOther}:{k:string;h
   {!base&&!err&&<Loader text="טוען…"/>}
  </div>;}
 
-function SettingsSheet({close,size,setSize,user,canLogin,login,logout,status,syncing,sync,items,restore}:{close:()=>void;size:string;setSize:(v:string)=>void;user:User|null;canLogin:boolean;login:()=>Promise<void>;logout:()=>Promise<void>;
+function SettingsSheet({spoil,setSpoil,close,size,setSize,user,canLogin,login,logout,status,syncing,sync,items,restore}:{spoil:boolean;setSpoil:(v:boolean)=>void;close:()=>void;size:string;setSize:(v:string)=>void;user:User|null;canLogin:boolean;login:()=>Promise<void>;logout:()=>Promise<void>;
  status:{tmdb:boolean;db:boolean}|null;syncing:boolean;sync:()=>void;items:Item[];restore:(l:Item[])=>void}){const ref=useSheet(close);const file=useRef<HTMLInputElement>(null);const [msg,setMsg]=useState('');
  const backup=()=>{const b=new Blob([JSON.stringify({app:'unwatch',v:1,items},null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='unwatch-'+todayISO()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),3000);};
  return <div className="sheet" role="dialog" aria-modal="true" aria-label="הגדרות"><div className="sheetTop"><h2 style={{margin:0}}>הגדרות</h2><button ref={ref} className="ib" aria-label="סגירה" onClick={close}><X/></button></div>
   <section className="set" aria-labelledby="h-size"><h3 id="h-size">גודל טקסט</h3><div className="seg" role="group" aria-labelledby="h-size">{([['','רגיל'],['large','גדול'],['xlarge','גדול מאוד']] as const).map(([v,t])=><button key={t} aria-pressed={size===v} onClick={()=>setSize(v)}>{t}</button>)}</div></section>
+  <section className="set"><label className="swRow"><span><b>מגן ספוילרים</b><small>מסתיר שמות של פרקים שעוד לא ראית</small></span><input type="checkbox" role="switch" className="sw" checked={spoil} onChange={e=>setSpoil(e.target.checked)}/></label></section>
   <section className="set" aria-labelledby="h-sync"><h3 id="h-sync">סנכרון</h3>
    {user?<><p className="setNote">מחובר בתור {user.email}. הספרייה נשמרת גם בשרת.</p>{status&&!status.db&&<p className="setNote">השרת עוד לא מחובר למסד הנתונים, אז הסנכרון לא פעיל.</p>}
      <div className="do"><button className="ghost" style={{flex:1}} onClick={sync} disabled={syncing}><RefreshCw aria-hidden="true"/>{syncing?'מסנכרן…':'סנכרון עכשיו'}</button><form action={logout} style={{flex:1,display:'flex'}}><button className="ghost" style={{flex:1}}><LogOut aria-hidden="true"/>התנתקות</button></form></div></>
@@ -274,4 +309,27 @@ function SettingsSheet({close,size,setSize,user,canLogin,login,logout,status,syn
    {msg&&<p className="setNote" role="status">{msg}</p>}</section>
   {status&&!status.tmdb&&<section className="set"><h3>מפתח TMDB</h3><p className="setNote">החיפוש, הפרקים ותאריכי היציאה מגיעים מ-TMDB. צריך להוסיף ב-Vercel משתנה TMDB_TOKEN.</p></section>}
   <p className="setNote" style={{textAlign:'center',marginTop:20}}>נתונים על סרטים וסדרות: TMDB. המוצר משתמש ב-TMDB API אך אינו מאושר או נתמך על ידה.</p>
+ </div>;}
+
+function FreeTime({min,ups,shows,movies,open}:{min:number;ups:{it:Item;up:Up|null}[];shows:Record<string,Summary>;movies:Item[];open:(k:string)=>void}){
+ const eps=ups.filter(x=>x.up?.state==='ready').map(x=>{const rt=shows[x.it.key]?.runtime||24;const left=x.up?.state==='ready'?x.up.left:0;return {it:x.it,n:Math.min(left,Math.floor(min/rt)),rt};}).filter(x=>x.n>0).sort((a,b)=>b.n*b.rt-a.n*a.rt);
+ const mv=movies.map(m=>({it:m,rt:shows[m.key]?.runtime||0})).filter(m=>m.rt&&m.rt<=min).sort((a,b)=>b.rt-a.rt);
+ return <div className="note" role="status" style={{marginTop:10}}><b>מה נכנס ב{dur(min)}:</b>{!eps.length&&!mv.length&&<p className="setNote" style={{margin:'6px 0 0'}}>אין משהו שנכנס בזמן הזה.</p>}
+  <div style={{display:'grid',gap:8,marginTop:8}}>{eps.slice(0,4).map(x=><button key={x.it.key} className="line" onClick={()=>open(x.it.key)}><Poster src={x.it.poster} kind={x.it.kind}/><span className="info"><span className="nm" dir="auto">{bidi(x.it.title)}</span><span className="meta">{x.n===1?'פרק אחד':x.n+' פרקים'} · {dur(x.n*x.rt)}</span></span></button>)}
+   {mv.slice(0,3).map(x=><button key={x.it.key} className="line" onClick={()=>open(x.it.key)}><Poster src={x.it.poster} kind={x.it.kind}/><span className="info"><span className="nm" dir="auto">{bidi(x.it.title)}</span><span className="meta">סרט · {dur(x.rt)}</span></span></button>)}</div></div>;}
+
+function StatsSheet({close,items,shows}:{close:()=>void;items:Item[];shows:Record<string,Summary>}){const ref=useSheet(close);const y=new Date().getFullYear();
+ const log=read<Log[]>(LS.log,[]).filter(l=>new Date(l.t).getFullYear()===y);const minutes=log.reduce((a,l)=>a+l.min,0);
+ const epsN=log.filter(l=>l.kind!=='movie'||items.find(i=>i.key===l.k)?.media==='tv').reduce((a,l)=>a+l.n,0);const movies=log.filter(l=>l.k.startsWith('movie:')).length;
+ const cinema=items.filter(i=>i.source==='cinema'&&i.watchedAt&&new Date(i.watchedAt).getFullYear()===y).length;
+ const by=new Map<string,{title:string;min:number}>();for(const l of log){const c=by.get(l.k)||{title:l.title,min:0};c.min+=l.min;by.set(l.k,c);}const top=[...by.values()].sort((a,b)=>b.min-a.min).slice(0,5);
+ const kinds=(['anime','tv','movie'] as Kind[]).map(k=>({k,min:log.filter(l=>l.kind===k).reduce((a,l)=>a+l.min,0)}));
+ // Everything ever watched, estimated from where each show stands.
+ const all=items.reduce((a,i)=>{const s=shows[i.key];if(i.media==='tv'&&i.at&&s)return a+absOf(i.at,s.seasons)*(s.runtime||24);if(i.media==='movie'&&i.status==='done')return a+(s?.runtime||100);return a;},0);
+ return <div className="sheet" role="dialog" aria-modal="true" aria-label="הסיכום שלי"><div className="sheetTop"><h2 style={{margin:0}}>הסיכום שלי - {y}</h2><button ref={ref} className="ib" aria-label="סגירה" onClick={close}><X/></button></div>
+  <div className="statGrid"><div><b>{dur(minutes)}</b><span>זמן צפייה השנה</span></div><div><b>{epsN}</b><span>פרקים</span></div><div><b>{movies}</b><span>סרטים</span></div><div><b>{cinema}</b><span>בקולנוע</span></div></div>
+  {minutes>0&&<section className="set"><h3>לפי סוג</h3>{kinds.map(x=><div key={x.k} className="bar"><span>{KIND_LABEL[x.k]}</span><span className="track" aria-hidden="true"><i style={{width:(minutes?x.min/minutes*100:0)+'%'}}/></span><b>{dur(x.min)}</b></div>)}</section>}
+  {top.length>0&&<section className="set"><h3>הכי הרבה זמן</h3><ol className="top">{top.map(t=><li key={t.title}><span dir="auto">{bidi(t.title)}</span><b>{dur(t.min)}</b></li>)}</ol></section>}
+  {!log.length&&<p className="setNote">הסיכום מתמלא מכל "צפיתי" שתסמן מעכשיו.</p>}
+  {all>0&&<p className="setNote" style={{textAlign:'center'}}>בסך הכל, לפי הספרייה: בערך {dur(all)} של צפייה.</p>}
  </div>;}
