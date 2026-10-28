@@ -106,3 +106,38 @@ details.fold summary::-webkit-details-marker{display:none}details.fold>div{paddi
 @keyframes lid{from{transform:translateY(-40px);opacity:0}to{transform:none;opacity:1}}
 @keyframes sin{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+/* motion - all of it is switched off by "reduce motion" above */
+.splash .smark{width:132px;height:auto;overflow:visible}
+.splash .smark .u{animation:uIn .5s ease-out both;transform-origin:50% 100%;transform-box:fill-box}
+.splash .smark .lid{animation:lidDrop .75s .25s cubic-bezier(.3,1.5,.5,1) both;transform-box:fill-box;transform-origin:50% 100%}
+.splash .smark .lid path{animation:playPulse .5s 1s ease-out both;transform-box:fill-box;transform-origin:50% 50%}
+.splash .sname{animation:sin .55s .55s ease-out both}
+@keyframes uIn{from{opacity:0;transform:translateY(16px) scaleY(.8)}to{opacity:1;transform:none}}
+@keyframes lidDrop{0%{opacity:0;transform:translateY(-70px) rotate(-14deg)}60%{opacity:1}100%{transform:none}}
+@keyframes playPulse{0%{transform:scale(1)}45%{transform:scale(1.45)}100%{transform:scale(1)}}
+.loader{display:flex;flex-direction:column;align-items:center;gap:14px;padding:48px 0 32px;color:var(--mut)}
+.loader p{margin:0;animation:lfade 1.6s ease-in-out infinite}
+.lmark{width:84px;height:auto;overflow:visible}
+.lmark .lid{animation:lidBob 1.4s ease-in-out infinite;transform-box:fill-box;transform-origin:50% 100%}
+@keyframes lidBob{0%,100%{transform:none}50%{transform:translateY(-14px) rotate(-6deg)}}
+@keyframes lfade{0%,100%{opacity:1}50%{opacity:.45}}
+.tabIn{animation:tabIn .3s ease-out both}
+@keyframes tabIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.rise{animation:rise .42s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(min(var(--i,0),10)*45ms)}
+@keyframes rise{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+.poster img{opacity:0;transition:opacity .35s ease}.poster img.in{opacity:1}
+.next{animation:fadeUp .35s ease-out both}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.shim{display:block;height:1em;width:60%;border-radius:8px;background:linear-gradient(90deg,#221e30 0,#332c4a 50%,#221e30 100%);background-size:200% 100%;animation:shimmer 1.2s linear infinite}
+@keyframes shimmer{to{background-position:-200% 0}}
+.press{transition:transform .12s ease}.press:active{transform:scale(.96)}
+.pop{animation:pop .45s cubic-bezier(.3,1.6,.5,1)}
+@keyframes pop{0%{transform:scale(.94)}50%{transform:scale(1.05)}100%{transform:none}}
+.card,.line,.tile .poster{transition:transform .15s ease,border-color .2s}.card:active,.line:active,.tile:active .poster{transform:scale(.985)}
+.eps button.on .ck{animation:ck .35s cubic-bezier(.3,1.6,.5,1)}
+@keyframes ck{0%{transform:scale(.6)}100%{transform:none}}
+.toast{animation:toastIn .3s cubic-bezier(.2,.8,.2,1) both}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,16px)}to{opacity:1;transform:translate(-50%,0)}}
+.chip,.seg button{transition:background .2s,border-color .2s,color .2s}
+nav button .ni svg{transition:transform .25s cubic-bezier(.3,1.6,.5,1)}nav button.selected .ni svg{transform:translateY(-1px) scale(1.12)}
