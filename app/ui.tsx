@@ -40,7 +40,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
  const synced=useRef(false);const pending=useRef<ReturnType<typeof setTimeout>|null>(null);
 
  useEffect(()=>{setItems(read(LS.lib,[]));setRemoved(read(LS.removed,{}));setShows(read(LS.shows,{}));setTab(read(LS.tab,'up'));setSize(read(LS.size,''));setReady(true);
-  const quick=matchMedia('(prefers-reduced-motion: reduce)').matches;setTimeout(()=>setSplash(1),quick?150:1350);setTimeout(()=>setSplash(0),quick?400:1750);
+  const quick=matchMedia('(prefers-reduced-motion: reduce)').matches;setTimeout(()=>setSplash(0),quick?500:2500);
   api<{tmdb:boolean;db:boolean}>('/api/status').then(setStatus).catch(()=>{});},[]);
  useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(null),5000);return ()=>clearTimeout(t);},[toast]);
 
@@ -87,7 +87,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
 
  const cls='app'+(size?' '+size:'');
  return <main className={cls}>
-  {splash>0&&<div className={'splash'+(splash===1?' out':'')} aria-hidden="true"><Mark className="smark"/><div className="sname" dir="ltr">Unwatch</div></div>}
+  {splash>0&&<div className={'splash'+(splash===1?' out':'')} aria-hidden="true" onAnimationEnd={e=>{if(e.target===e.currentTarget)setSplash(0);}}><Mark className="smark"/><div className="sname" dir="ltr">Unwatch</div></div>}
   <header className="row">
    <div className="brand" role="img" aria-label="Unwatch"><Mark/><span aria-hidden="true">nwatch</span></div>
    <div className="actions"><button className="ib" aria-label="חיפוש והוספה" onClick={()=>setSearching(true)}><Search/></button><button className="ib" aria-label="הגדרות" onClick={()=>setSettings(true)}><Settings/></button></div>
