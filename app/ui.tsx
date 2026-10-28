@@ -33,9 +33,10 @@ function HePills({it}:{it:Item}){return <>{dubOf(it)&&<span className="pill ok">
 const yn=(v:boolean|null|undefined)=>v===true?'יש':v===false?'אין':'לא ידוע';
 const OFFER_TYPE:Record<Offer['type'],string>={stream:'במנוי',free:'חינם',rent:'השכרה',buy:'קנייה'};
 
-function useSheet(close:()=>void){const ref=useRef<HTMLButtonElement>(null);
- useEffect(()=>{const back=document.activeElement as HTMLElement|null;ref.current?.focus();const k=(e:KeyboardEvent)=>{if(e.key==='Escape')close();};window.addEventListener('keydown',k);document.body.style.overflow='hidden';
-  return ()=>{window.removeEventListener('keydown',k);document.body.style.overflow='';back?.focus?.();};},[close]);return ref;}
+// Focus moves to the close button once, when the sheet opens (not on every change, which scrolled it back to the top).
+function useSheet(close:()=>void){const ref=useRef<HTMLButtonElement>(null);const fn=useRef(close);fn.current=close;
+ useEffect(()=>{const back=document.activeElement as HTMLElement|null;ref.current?.focus({preventScroll:true});const k=(e:KeyboardEvent)=>{if(e.key==='Escape')fn.current();};window.addEventListener('keydown',k);document.body.style.overflow='hidden';
+  return ()=>{window.removeEventListener('keydown',k);document.body.style.overflow='';back?.focus?.({preventScroll:true});};},[]);return ref;}
 
 export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:User|null;login:()=>Promise<void>;logout:()=>Promise<void>}){
  const [items,setItems]=useState<Item[]>([]);const [removed,setRemoved]=useState<Removed>({});const [shows,setShows]=useState<Record<string,Summary&{at?:number}>>({});
@@ -246,8 +247,8 @@ function DetailSheet({k,hit,item,close,save,remove,onSeen,openOther}:{k:string;h
        {o.icon?<img src={o.icon} alt=""/>:<Tv aria-hidden="true"/>}<span className="t"><b>{o.service}</b><small>{OFFER_TYPE[o.type]}{o.audio.length?' · שמע: '+o.audio.map(l=>LANG_HE[l.slice(0,2)]||l).join(', '):''}</small>
        <span className="tags">{o.dub&&<span className="pill ok"><Mic aria-hidden="true"/>דיבוב</span>}{o.heSubs&&<span className="pill ok"><Captions aria-hidden="true"/>כתוביות</span>}{!o.audio.length&&!o.subs.length&&<span className="pill dim">שפות לא ידועות</span>}</span></span><ExternalLink size={18} aria-hidden="true"/></a></li>)}</ul>
      :d&&d.providers.stream.length?<><p className="setNote" style={{margin:'10px 0 4px'}}>בסטרימינג בישראל:</p><div className="prov">{d.providers.stream.map(p=><span key={p.name}>{p.logo&&<img src={p.logo} alt=""/>}{p.name}</span>)}</div></>
-     :<p className="setNote">לא נמצא בשירותי צפייה בישראל.</p>}
-     {heI.found&&heI.dub===null&&heI.subs===null&&<p className="setNote">השירות לא פרסם אילו שפות יש. אפשר לסמן ידנית.</p>}</>}
+     :<p className="setNote">{media==='movie'&&base.release&&daysTo(base.release)>-120?'עכשיו רק בקולנוע - עוד לא זמין בשירותי צפייה בישראל.':'לא נמצא בשירותי צפייה בישראל (נטפליקס, דיסני+, פריים וידאו, Apple TV, yes, HOT ועוד).'}</p>}
+     {heI.offers.length>0&&heI.dub===null&&heI.subs===null&&<p className="setNote">השירותים לא פרסמו אילו שפות יש. אפשר לסמן ידנית.</p>}</>}
     {item?<details className="fold" style={{marginTop:12}}><summary><span>תיקון ידני</span><ChevronDown size={20} aria-hidden="true"/></summary><div><Tri label="דיבוב לעברית" icon={Mic} value={item.dub} set={v=>set({dub:v})}/><Tri label="כתוביות בעברית" icon={Captions} value={item.subs} set={v=>set({subs:v})}/></div></details>:null}
    </section>
    {d&&d.similar.length>0&&<section aria-labelledby="h-sim"><h2 className="sec" id="h-sim">אולי תאהב גם</h2><ul className="hscroll">{d.similar.map((h,n)=><li key={h.key} className="rise" style={{'--i':n} as React.CSSProperties}><button className="tile" onClick={()=>openOther(h)}><Poster src={h.poster} kind={h.kind}/><span dir="auto">{bidi(h.title)}</span></button></li>)}</ul></section>}

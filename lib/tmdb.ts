@@ -47,14 +47,14 @@ type DRaw=Raw&{backdrop_path?:string|null;runtime?:number;episode_run_time?:numb
 export const STATUS_HE:Record<string,string>={'Returning Series':'ממשיכה','Ended':'הסתיימה','Canceled':'בוטלה','In Production':'בהפקה','Planned':'מתוכננת','Released':'יצא','Post Production':'בעריכה','Rumored':'שמועה'};
 export async function detail(media:Media,id:number):Promise<Detail>{
  const extra=(media==='movie'?'watch/providers,release_dates,translations':'watch/providers,translations,external_ids')+',videos,recommendations,credits';
- const [he,en]=await Promise.all([tmdb<DRaw>('/'+media+'/'+id,{append_to_response:extra,include_video_language:'he,en,ja,null'},3*3600),tmdb<DRaw>('/'+media+'/'+id,{language:'en-US'},24*3600)]);
+ const [he,en]=await Promise.all([tmdb<DRaw>('/'+media+'/'+id,{append_to_response:extra,include_video_language:'he,en,ja,null'},3*3600),tmdb<DRaw>('/'+media+'/'+id,{language:'en-US',append_to_response:'credits'},24*3600)]);
  const h=toHit(he,en,media);const rel=media==='movie'?releaseIL(he.release_dates)||h.release:undefined;
  return {...h,release:rel,backdrop:img(he.backdrop_path||en.backdrop_path,'w780'),genres:(he.genres||[]).map(g=>g.name),runtime:he.runtime||he.episode_run_time?.[0]||null,
   status:STATUS_HE[he.status||'']||he.status||'',seasons:(he.seasons||[]).filter(s=>s.season_number>0&&s.episode_count>0).map(s=>({n:s.season_number,name:s.name,count:s.episode_count,air:s.air_date||undefined})),
   last:ep(he.last_episode_to_air),next:ep(he.next_episode_to_air),providers:providersIL(he['watch/providers']?.results),
   heTitle:!!he.translations?.translations.some(t=>t.iso_639_1==='he'),imdb:he.imdb_id||he.external_ids?.imdb_id||null,en:en.title||en.name||'',
   trailer:trailerOf(he.videos?.results||[]),similar:(he.recommendations?.results||[]).filter(r=>r.poster_path).slice(0,12).map(r=>toHit(r,undefined,(r.media_type as Media)||media)),
-  cast:(he.credits?.cast||[]).sort((a,b)=>a.order-b.order).slice(0,6).map(c=>c.name)};}
+  cast:(en.credits?.cast||he.credits?.cast||[]).sort((a,b)=>a.order-b.order).slice(0,6).map(c=>c.name)};}
 // A YouTube trailer: Hebrew-subtitled or official first.
 export function trailerOf(v:{site:string;type:string;key:string;official?:boolean;iso_639_1?:string}[]){const yt=v.filter(x=>x.site==='YouTube'&&/Trailer|Teaser/.test(x.type));
  const best=yt.find(x=>x.iso_639_1==='he')||yt.find(x=>x.type==='Trailer'&&x.official)||yt.find(x=>x.type==='Trailer')||yt[0];return best?'https://www.youtube.com/watch?v='+best.key:null;}
