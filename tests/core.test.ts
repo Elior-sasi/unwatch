@@ -129,3 +129,9 @@ test('notifications: what counts as news',()=>{
  const mv={key:'movie:5',title:'מואנה 3',status:'plan',media:'movie' as const};
  assert.deepEqual(news(mv,{he:he(null,null)},{sum:{...sum(1,1),last:null,release:'2026-11-05'},he:he(null,null,['Disney Plus'])},P,'2026-11-05').map(n=>n.body),['יוצא היום בקולנוע בישראל','זמין עכשיו לצפייה ב-Disney Plus']);
 });
+import {hotType} from '../lib/cinema';
+test('HOT screening language',()=>{
+ assert.equal(hotType({DubbedLanguage:'עברית',SubtitledLanguage:null}),'dub');
+ assert.equal(hotType({DubbedLanguage:null,SubtitledLanguage:'עברית'}),'sub');
+ assert.equal(hotType({DubbedLanguage:'רוסית',SubtitledLanguage:null}),'orig');
+});

@@ -33,8 +33,9 @@ export const norm=(t:string)=>cleanName(t).toLowerCase().replace(/[^\p{L}\p{N}]+
 export async function cinemas():Promise<(Cinema&{chain:string})[]>{const until=iso(new Date(Date.now()+30*864e5));
  const all=await Promise.all((Object.keys(CHAINS) as Chain[]).map(async ch=>{try{const b=await get<{cinemas:{id:string;displayName:string;addressInfo?:{city?:string}}[]}>('cinemas/with-event/until/'+until+'?attr=&lang=he_IL',24*3600,ch);
    return (b.cinemas||[]).map(c=>({id:ch+':'+c.id,chain:CHAINS[ch].name,name:c.displayName.replace(CHAINS[ch].strip,'').trim()||c.displayName,city:c.addressInfo?.city||''}));}catch{return [];}}));
- if(!all.flat().length)throw new Error('CINEMA_DOWN');
- return all.flat().sort((a,b)=>a.name.localeCompare(b.name,'he'));}
+ const hot=await hotCinemas().catch(()=>[]);
+ if(!all.flat().length&&!hot.length)throw new Error('CINEMA_DOWN');
+ return [...all.flat(),...hot].sort((a,b)=>a.name.localeCompare(b.name,'he'));}
 
 type VFilm={id:string;name:string;length?:number;posterLink?:string;link?:string;releaseYear?:string;attributeIds?:string[]};
 type VEvent={id:string;filmId:string;eventDateTime:string;attributeIds?:string[];bookingLink?:string;bookingRouterLaunchLink?:string;auditorium?:string;soldOut?:boolean};
@@ -43,6 +44,7 @@ export async function schedule(ids:string[],days=6):Promise<CinemaFilm[]>{const 
  const dates=Array.from({length:days},(_,i)=>iso(new Date(Date.now()+i*864e5)));const films=new Map<string,CinemaFilm>();
  const jobs=ids.slice(0,3).map(c=>/^\d+$/.test(c)?'p:'+c:c).flatMap(c=>dates.map(d=>({c,d})));let i=0;
  await Promise.all(Array.from({length:6},async()=>{while(i<jobs.length){const {c,d}=jobs[i++];
+  if(c.startsWith('hot:')){await hotDay(c,d,names.get(c)||'',films);continue;}
   try{const sp=splitId(c);const b=await get<{films:VFilm[];events:VEvent[]}>('film-events/in-cinema/'+sp.id+'/at-date/'+d+'?attr=&lang=he_IL',1800,sp.chain);
    const fm=new Map((b.films||[]).map(f=>[f.id,f]));
    for(const e of b.events||[]){const f=fm.get(e.filmId);if(!f)continue;const cls=classify([...(e.attributeIds||[]),...(f.attributeIds||[])],f.name);
@@ -56,3 +58,25 @@ export function matchFilm(list:CinemaFilm[],names:string[]):CinemaFilm[]{const w
  // A longer name may add a subtitle ("Wicked: For Good"), but never a sequel number ("מואנה" is not "מואנה 2").
  const close=(a:string,b:string)=>{const [s,l]=a.length<=b.length?[a,b]:[b,a];return s.length>4&&l.startsWith(s)&&l.length-s.length<=12&&!/\d/.test(l.slice(s.length));};
  return list.filter(f=>{const n=norm(f.name);return want.some(w=>n===w||close(n,w));});}
+
+// HOT Cinema: its own site answers with every screening of a branch on a date, each marked with its dubbing and subtitle language.
+const HOT='https://www.hotcinema.co.il';
+type HotDate={Date:string;Hour:string;EventId:string;DubbedLanguage:string|null;SubtitledLanguage:string|null;Is3D:boolean|null;IsAtmos?:boolean|null;IsVIP?:boolean|null};
+const dmy=(iso_:string)=>{const [y,m,d]=iso_.split('-');return d+'/'+m+'/'+y;};
+async function hotJson<T>(path:string,revalidate:number):Promise<T>{const r=await fetch(HOT+path,{headers:{accept:'application/json','user-agent':'Mozilla/5.0 Unwatch (personal)','x-requested-with':'XMLHttpRequest'},next:{revalidate}});
+ if(!r.ok)throw new Error('HOT_'+r.status);return r.json() as Promise<T>;}
+export function hotType(d:{DubbedLanguage:string|null;SubtitledLanguage:string|null}):Show['type']{const he=(x:string|null)=>!!x&&/עברית|hebrew/i.test(x);
+ return he(d.DubbedLanguage)?'dub':he(d.SubtitledLanguage)?'sub':'orig';}
+// Branches are found by asking which ids have screenings (once a day).
+async function hotCinemas():Promise<(Cinema&{chain:string})[]>{const today=dmy(iso(new Date()));const ids=Array.from({length:45},(_,i)=>i+1);const out:(Cinema&{chain:string})[]=[];let i=0;
+ await Promise.all(Array.from({length:8},async()=>{while(i<ids.length){const id=ids[i++];
+  try{const r=await hotJson<{TheaterName:string;TheaterID:number}[]>('/tickets/movieevents?movieid=&date='+today+'&theatreid='+id+'&time=&type=',24*3600);
+   const n=r.find(x=>x.TheaterID===id)?.TheaterName;if(n)out.push({id:'hot:'+id,chain:'HOT',name:n.replace(/^HOT CINEMA\s*/i,'').trim(),city:''});}catch{}}}));
+ return out;}
+async function hotDay(c:string,date:string,name:string,films:Map<string,CinemaFilm>){const id=c.slice(4);
+ try{const r=await hotJson<{MovieName:string;MovieId:number;Dates:HotDate[]}[]>('/tickets/TheaterEvents?movieid=&date='+dmy(date)+'&theatreid='+id+'&site=',1800);
+  for(const m of r){const key=norm(m.MovieName)||'hot'+m.MovieId;const cur=films.get(key)||{id:'hot'+m.MovieId,name:cleanName(m.MovieName)||m.MovieName,year:null,poster:null,length:null,link:HOT+'/movie/'+m.MovieId,dub:false,sub:false,shows:[]};
+   for(const d of m.Dates||[]){if(!d.Date.startsWith(date))continue;const type=hotType(d);
+    cur.shows.push({cinema:(name||'HOT')+' (HOT)',date,time:(d.Hour||d.Date.slice(11,16)).slice(0,5),type,lang:null,format:[d.Is3D?'3D':'',d.IsAtmos?'ATMOS':'',d.IsVIP?'VIP':''].filter(Boolean),link:HOT+'/theater/'+id,hall:null,soldOut:false});
+    if(type==='dub')cur.dub=true;if(type==='sub')cur.sub=true;}
+   if(cur.shows.length)films.set(key,cur);}}catch{}}
