@@ -104,3 +104,28 @@ test('AniList airing pick',()=>{
  assert.equal(pickAiring(list,['Jujutsu Kaisen'],'2026-11-10'),null);
  assert.equal(pickAiring(list,['Bleach']),null);
 });
+import {classify,cleanName,matchFilm} from '../lib/cinema';
+test('cinema screenings: dubbed, subtitled or original',()=>{
+ assert.equal(classify(['2d','dubbed','dubbed-lang-he']).type,'dub');
+ assert.equal(classify(['2d','subbed','original-lang-en-us','first-subbed-lang-he']).type,'sub');
+ assert.equal(classify(['2d'],'מואנה 2 מדובב').type,'dub');
+ assert.equal(classify(['2d'],'מואנה 2 מתורגם').type,'sub');
+ assert.equal(classify(['imax','3d']).type,'orig');assert.deepEqual(classify(['imax','3d']).format,['IMAX','3D']);
+ assert.equal(cleanName('מואנה 2 מדובב 3D'),'מואנה 2');assert.equal(cleanName('Wicked (עברית)'),'Wicked');
+ const f=(name:string)=>({id:name,name,year:null,poster:null,length:null,link:null,dub:false,sub:false,shows:[]});
+ assert.deepEqual(matchFilm([f('מואנה 2'),f('מואנה'),f('שרק 5')],['מואנה 2','Moana 2']).map(x=>x.name),['מואנה 2']);
+ assert.deepEqual(matchFilm([f('Wicked: For Good')],['ויקד: לתמיד','Wicked: For Good']).map(x=>x.name),['Wicked: For Good']);
+});
+import {news} from '../lib/notify';
+test('notifications: what counts as news',()=>{
+ const P={ep:true,he:true,movie:true};const sum=(s:number,e:number)=>({key:'tv:1',seasons:[{n:1,count:12},{n:2,count:12}],last:{s,e},next:null,status:'',stream:[]});
+ const tv={key:'tv:1',title:'JJK',status:'watching',media:'tv' as const};
+ assert.deepEqual(news(tv,{sum:sum(2,3)},{sum:sum(2,4)},P).map(n=>n.body),['יצא עונה 2 פרק 4']);
+ assert.equal(news(tv,{sum:sum(2,4)},{sum:sum(2,4)},P).length,0);
+ assert.equal(news(tv,{sum:sum(2,3)},{sum:sum(2,4)},{...P,ep:false}).length,0);
+ const he=(dub:boolean|null,subs:boolean|null,stream:string[]=[])=>({dub,subs,where:'Netflix',stream});
+ assert.deepEqual(news(tv,{he:he(false,true)},{he:he(true,true)},P).map(n=>n.body),['הגיע דיבוב לעברית ב-Netflix']);
+ assert.equal(news(tv,{},{he:he(true,true)},P).length,0);
+ const mv={key:'movie:5',title:'מואנה 3',status:'plan',media:'movie' as const};
+ assert.deepEqual(news(mv,{he:he(null,null)},{sum:{...sum(1,1),last:null,release:'2026-11-05'},he:he(null,null,['Disney Plus'])},P,'2026-11-05').map(n=>n.body),['יוצא היום בקולנוע בישראל','זמין עכשיו לצפייה ב-Disney Plus']);
+});

@@ -1,6 +1,6 @@
 'use client';
 import {useCallback,useEffect,useId,useMemo,useRef,useState} from 'react';
-import {Star,ExternalLink,Clapperboard,MonitorPlay as TrailerIcon,Users,Play,CalendarClock,Library,Search,Settings,X,Check,Plus,Minus,Pause,Trash2,Tv,Film,Sparkles,Languages,Captions,Mic,ChevronDown,Ticket,Download,Upload,LogIn,LogOut,RefreshCw,Clock} from 'lucide-react';
+import {Bell,BellOff,MapPin,Star,ExternalLink,Clapperboard,MonitorPlay as TrailerIcon,Users,Play,CalendarClock,Library,Search,Settings,X,Check,Plus,Minus,Pause,Trash2,Tv,Film,Sparkles,Languages,Captions,Mic,ChevronDown,Ticket,Download,Upload,LogIn,LogOut,RefreshCw,Clock} from 'lucide-react';
 import {after,before,upNext,epLabel,whenText,daysTo,type Up} from '@/lib/progress';
 import {merge,mergeRemoved,type Removed} from '@/lib/library';
 import type {HeInfo,Offer} from '@/lib/justwatch';
@@ -11,7 +11,7 @@ type User={name:string;email:string};
 type Tab='up'|'soon'|'cinema'|'lib';
 const TABS:[Tab,string,typeof Play][]=[['up','המשך',Play],['soon','בקרוב',CalendarClock],['cinema','קולנוע',Clapperboard],['lib','הספרייה',Library]];
 const KIND_ICON:Record<Kind,typeof Tv>={anime:Sparkles,tv:Tv,movie:Film};
-const LS={filler:'unwatch:filler',spoil:'unwatch:spoil',log:'unwatch:log',lib:'unwatch:lib',removed:'unwatch:removed',shows:'unwatch:shows',tab:'unwatch:tab',size:'unwatch:size'};
+const LS={cinemas:'unwatch:cinemas',device:'unwatch:device',notif:'unwatch:notif',filler:'unwatch:filler',spoil:'unwatch:spoil',log:'unwatch:log',lib:'unwatch:lib',removed:'unwatch:removed',shows:'unwatch:shows',tab:'unwatch:tab',size:'unwatch:size'};
 const read=<T,>(k:string,d:T):T=>{try{const v=localStorage.getItem(k);return v?JSON.parse(v) as T:d;}catch{return d;}};
 const write=(k:string,v:unknown)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}};
 // Latin runs inside Hebrew text keep their order ("Jujutsu Kaisen 2").
@@ -29,6 +29,7 @@ const dateIL=(ms:number)=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusa
 const dur=(m:number)=>{m=Math.round(m);if(m<60)return m+' דק׳';const h=Math.floor(m/60),r=m%60;return (h===1?'שעה':h===2?'שעתיים':h+' שעות')+(r?' ו-'+r+' דק׳':'');};
 type Log={k:string;t:number;min:number;kind:Kind;n:number;title:string};
 const logWatch=(it:Item,min:number,n=1)=>{const l=read<Log[]>(LS.log,[]);l.push({k:it.key,t:Date.now(),min:Math.round(min),kind:it.kind,n,title:it.title});write(LS.log,l.slice(-6000));};
+const deviceId=()=>{let d=read<string>(LS.device,'');if(!d){const a=new Uint8Array(18);crypto.getRandomValues(a);d=btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');write(LS.device,d);}return d;};
 const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 
 export function Mark({className}:{className?:string}){return <svg className={className} viewBox="40 40 100 110" aria-hidden="true">
@@ -61,6 +62,14 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
  useEffect(()=>{setItems(read(LS.lib,[]));setRemoved(read(LS.removed,{}));setShows(read(LS.shows,{}));setTab(read(LS.tab,'up'));setSize(read(LS.size,''));setFills(read(LS.filler,{}));setSpoil(read(LS.spoil,true));setReady(true);
   const quick=matchMedia('(prefers-reduced-motion: reduce)').matches;setTimeout(()=>setSplash(0),quick?500:2500);
   api<{tmdb:boolean;db:boolean}>('/api/status').then(setStatus).catch(()=>{});},[]);
+ // Notifications: the service worker, and a tapped notification opening its title.
+ useEffect(()=>{if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+  const q=new URLSearchParams(location.search).get('k');if(q&&/^(tv|movie):\d+$/.test(q)){setOpenKey(q);history.replaceState(null,'','/');}
+  const m=(e:MessageEvent)=>{if(e.data?.type==='open'){const k=new URL(e.data.url,location.origin).searchParams.get('k');if(k){setHit(null);setOpenKey(k);}}};navigator.serviceWorker?.addEventListener('message',m);return ()=>navigator.serviceWorker?.removeEventListener('message',m);},[]);
+ // The phone's followed titles go to the server (only when notifications are on), so the scheduled check knows what to look for.
+ useEffect(()=>{if(!ready)return;const n=read<{on:boolean;prefs:{ep:boolean;he:boolean;movie:boolean}}>(LS.notif,{on:false,prefs:{ep:true,he:true,movie:true}});if(!n.on)return;
+  const t=setTimeout(()=>{fetch('/api/push',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({device:deviceId(),items:items.filter(i=>i.status!=='dropped'&&i.status!=='done'||i.media==='tv'&&i.status==='done').slice(0,400).map(i=>({key:i.key,title:i.title.slice(0,200),status:i.status,media:i.media})),prefs:n.prefs})}).catch(()=>{});},2500);
+  return ()=>clearTimeout(t);},[ready,items]);
  useEffect(()=>{if(!toast)return;const t=setTimeout(()=>setToast(null),5000);return ()=>clearTimeout(t);},[toast]);
 
  const push=useCallback((list:Item[],rem:Removed)=>{if(!user||!synced.current)return;if(pending.current)clearTimeout(pending.current);
@@ -157,7 +166,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
     {l.map((x,n)=><button key={x.it.key} className="line rise" style={{'--i':n} as React.CSSProperties} onClick={()=>open(x.it.key)}><Poster src={x.it.poster} kind={x.it.kind}/><span className="info"><span className="nm" dir="auto">{bidi(x.it.title)}</span><span className="meta">{x.label} · {KIND_LABEL[x.it.kind]}</span></span></button>)}</div>)}
   </section>}
 
-  {tab==='cinema'&&<Cinema open={open} byKey={byKey}/>}
+  {tab==='cinema'&&<Cinema open={open} byKey={byKey} pick={()=>setSettings(true)}/>}
 
   {tab==='lib'&&<Lib items={items} shows={shows} open={open} stats={()=>setStats(true)}/>}
 
@@ -175,10 +184,12 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
   <div aria-live="polite" key={toast?.text||''} className={toast?'toast':'sr'}>{toast&&<>{toast.text}{toast.undo&&<button onClick={()=>{toast.undo!();setToast(null);}}>ביטול</button>}</>}</div>
  </main>;}
 
-function Cinema({open,byKey}:{open:(k:string,h?:Hit)=>void;byKey:Map<string,Item>}){const [d,setD]=useState<{now:Hit[];soon:Hit[]}|null>(null);const [err,setErr]=useState('');
+function Cinema({open,byKey,pick}:{open:(k:string,h?:Hit)=>void;byKey:Map<string,Item>;pick:()=>void}){const [d,setD]=useState<{now:Hit[];soon:Hit[]}|null>(null);const [err,setErr]=useState('');
  const load=useCallback(()=>{setErr('');api<{now:Hit[];soon:Hit[]}>('/api/cinema').then(setD).catch(e=>setErr(e.message));},[]);useEffect(load,[load]);
  const seen=[...byKey.values()].filter(i=>i.source==='cinema').sort((a,b)=>(b.watchedAt||0)-(a.watchedAt||0));
  return <section className="tabIn" aria-labelledby="h-cin"><h1 id="h-cin">קולנוע</h1><p className="sub">מה מוקרן עכשיו בישראל</p>
+  <Showtimes pick={pick}/>
+  <h2 className="sec">מוקרנים עכשיו</h2>
   {err&&<div className="note" role="alert">{err} <button className="ghost full" onClick={load}><RefreshCw aria-hidden="true"/>לנסות שוב</button></div>}
   {!d&&!err&&<Loader text="בודק מה בקולנוע…"/>}
   {d&&<><ul className="grid">{d.now.map((h,n)=><li key={h.key} className="rise" style={{'--i':n} as React.CSSProperties}><button className="tile" onClick={()=>open(h.key,h)}><Poster src={h.poster} kind={h.kind}/><span dir="auto">{bidi(h.title)}</span>{byKey.get(h.key)?.status==='done'&&<small>ראית ✓</small>}</button></li>)}</ul>
@@ -268,6 +279,7 @@ function DetailSheet({k,hit,item,close,save,remove,onSeen,openOther,spoil,fill,s
    </section>}
    {item&&media==='movie'&&item.status==='watching'&&<section className="set"><h3><Pause aria-hidden="true"/>איפה עצרתי</h3><label className="field">עצרתי בדקה:<input inputMode="numeric" pattern="[0-9]*" value={midMin} onChange={e=>setMidMin(e.target.value.replace(/\D/g,'').slice(0,3))} onBlur={()=>set({mid:midMin?{s:0,e:0,min:+midMin}:null})} placeholder="למשל 40"/></label></section>}
 
+   {media==='movie'&&<MovieShows k={k}/>}
    {item&&media==='tv'&&<section className="set"><label className="swRow"><span><b><Users size={18} aria-hidden="true"/> צפייה משותפת</b><small>התקדמות נפרדת למה שרואים יחד</small></span><input type="checkbox" role="switch" className="sw" checked={!!item.together?.on} onChange={e=>set({together:{on:e.target.checked,name:item.together?.name||mate,at:item.together?.at||null}})}/></label>
     {item.together?.on&&<><label className="field">עם מי?<input value={mate} onChange={e=>setMate(e.target.value.slice(0,40))} onBlur={()=>set({together:{...item.together!,name:mate.trim()}})} placeholder="למשל אסיף"/></label>
      <div className="step"><button className="ib" aria-label="פרק משותף אחד אחורה" disabled={!item.together.at} onClick={()=>set({together:{...item.together!,at:item.together!.at?before(item.together!.at,seasons):null}})}><Minus/></button>
@@ -297,6 +309,8 @@ function SettingsSheet({spoil,setSpoil,close,size,setSize,user,canLogin,login,lo
  const backup=()=>{const b=new Blob([JSON.stringify({app:'unwatch',v:1,items},null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='unwatch-'+todayISO()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),3000);};
  return <div className="sheet" role="dialog" aria-modal="true" aria-label="הגדרות"><div className="sheetTop"><h2 style={{margin:0}}>הגדרות</h2><button ref={ref} className="ib" aria-label="סגירה" onClick={close}><X/></button></div>
   <section className="set" aria-labelledby="h-size"><h3 id="h-size">גודל טקסט</h3><div className="seg" role="group" aria-labelledby="h-size">{([['','רגיל'],['large','גדול'],['xlarge','גדול מאוד']] as const).map(([v,t])=><button key={t} aria-pressed={size===v} onClick={()=>setSize(v)}>{t}</button>)}</div></section>
+  <NotifySettings items={items}/>
+  <CinemaPicker/>
   <section className="set"><label className="swRow"><span><b>מגן ספוילרים</b><small>מסתיר שמות של פרקים שעוד לא ראית</small></span><input type="checkbox" role="switch" className="sw" checked={spoil} onChange={e=>setSpoil(e.target.checked)}/></label></section>
   <section className="set" aria-labelledby="h-sync"><h3 id="h-sync">סנכרון</h3>
    {user?<><p className="setNote">מחובר בתור {user.email}. הספרייה נשמרת גם בשרת.</p>{status&&!status.db&&<p className="setNote">השרת עוד לא מחובר למסד הנתונים, אז הסנכרון לא פעיל.</p>}
@@ -333,3 +347,58 @@ function StatsSheet({close,items,shows}:{close:()=>void;items:Item[];shows:Recor
   {!log.length&&<p className="setNote">הסיכום מתמלא מכל "צפיתי" שתסמן מעכשיו.</p>}
   {all>0&&<p className="setNote" style={{textAlign:'center'}}>בסך הכל, לפי הספרייה: בערך {dur(all)} של צפייה.</p>}
  </div>;}
+
+type CFilm={id:string;name:string;poster:string|null;length:number|null;link:string|null;dub:boolean;sub:boolean;shows:{cinema:string;date:string;time:string;type:'dub'|'sub'|'orig';format:string[];link:string|null;hall:string|null;soldOut:boolean}[]};
+const SHOW_TYPE={dub:'מדובב',sub:'כתוביות',orig:'שפת מקור'} as const;
+function ShowList({f,only}:{f:CFilm;only:''|'dub'|'sub'}){const list=f.shows.filter(x=>!only||x.type===only);const days=[...new Set(list.map(x=>x.date))];
+ return <div className="shows">{days.map(d=><div key={d}><h4>{whenText(d)}</h4><ul>{list.filter(x=>x.date===d).map((x,i)=><li key={i}>
+  <a className={'show '+x.type} href={x.link||f.link||'#'} target="_blank" rel="noopener noreferrer" aria-label={x.time+', '+x.cinema+', '+SHOW_TYPE[x.type]+(x.format.length?', '+x.format.join(' '):'')+(x.soldOut?', אזל':', להזמנת כרטיסים')}>
+   <b>{x.time}</b><span>{x.cinema}</span><span className="tp">{x.type==='dub'?<Mic aria-hidden="true"/>:x.type==='sub'?<Captions aria-hidden="true"/>:null}{SHOW_TYPE[x.type]}{x.format.length?' · '+x.format.join(' '):''}</span>{x.soldOut&&<span className="pill dim">אזל</span>}</a></li>)}</ul></div>)}</div>;}
+// Screenings in the chosen Planet cinemas, filtered by dubbed / subtitled.
+function Showtimes({pick}:{pick:()=>void}){const [ids]=useState(()=>read<string[]>(LS.cinemas,[]));const [films,setFilms]=useState<CFilm[]|null>(null);const [err,setErr]=useState('');const [only,setOnly]=useState<''|'dub'|'sub'>('');const [openF,setOpenF]=useState<string|null>(null);
+ useEffect(()=>{if(!ids.length)return;api<{films:CFilm[]}>('/api/showtimes?c='+ids.join(',')).then(r=>setFilms(r.films)).catch(e=>setErr(e.message));},[ids]);
+ if(!ids.length)return <div className="note"><b><Languages size={18} aria-hidden="true"/> הקרנות מדובבות ועם כתוביות</b><p className="setNote" style={{margin:'6px 0 10px'}}>בחר עד 3 סניפי פלאנט, ותראה לכל סרט איפה ומתי יש הקרנה מדובבת או עם כתוביות.</p><button className="primary full" onClick={pick}><MapPin aria-hidden="true"/>בחירת סניפים</button></div>;
+ const list=(films||[]).filter(f=>!only||(only==='dub'?f.dub:f.sub));
+ return <section aria-labelledby="h-shows"><h2 className="sec" id="h-shows">הקרנות לפי שפה</h2>
+  <div className="chips" role="group" aria-label="סוג הקרנה"><button className="chip" aria-pressed={!only} onClick={()=>setOnly('')}>הכל</button><button className="chip" aria-pressed={only==='dub'} onClick={()=>setOnly(only==='dub'?'':'dub')}><Mic size={16} aria-hidden="true"/>מדובב</button><button className="chip" aria-pressed={only==='sub'} onClick={()=>setOnly(only==='sub'?'':'sub')}><Captions size={16} aria-hidden="true"/>כתוביות</button><button className="chip" onClick={pick}><MapPin size={16} aria-hidden="true"/>סניפים</button></div>
+  {err&&<p className="note" role="alert">{err}</p>}{!films&&!err&&<Loader text="בודק הקרנות…"/>}
+  {films&&!list.length&&<p className="setNote">אין הקרנות {only==='dub'?'מדובבות ':only==='sub'?'עם כתוביות ':''}בסניפים שבחרת בימים הקרובים.</p>}
+  <ul className="list">{list.slice(0,40).map((f,n)=><li key={f.id} className="card rise" style={{'--i':n} as React.CSSProperties}>
+   <button className="open" aria-expanded={openF===f.id} onClick={()=>setOpenF(openF===f.id?null:f.id)}><span className="poster">{f.poster?<img src={f.poster} alt="" loading="lazy" onLoad={e=>e.currentTarget.classList.add('in')}/>:<Film size={26} aria-hidden="true"/>}</span>
+    <span className="info"><span className="nm" dir="auto">{bidi(f.name)}</span><span className="meta">{f.dub&&<span className="pill ok"><Mic aria-hidden="true"/>מדובב</span>}{f.sub&&<span className="pill ok"><Captions aria-hidden="true"/>כתוביות</span>}{!f.dub&&!f.sub&&<span className="pill dim">שפת מקור</span>}</span>
+    <span className="meta">{f.shows.filter(x=>!only||x.type===only).length} הקרנות{f.length?' · '+dur(f.length):''}</span></span><ChevronDown size={20} aria-hidden="true" className={openF===f.id?'rot':''}/></button>
+   {openF===f.id&&<ShowList f={f} only={only}/>}</li>)}</ul>
+ </section>;}
+function MovieShows({k}:{k:string}){const [ids]=useState(()=>read<string[]>(LS.cinemas,[]));const [films,setFilms]=useState<CFilm[]|null>(null);const [only,setOnly]=useState<''|'dub'|'sub'>('');
+ useEffect(()=>{if(ids.length)api<{films:CFilm[]}>('/api/showtimes?c='+ids.join(',')+'&key='+encodeURIComponent(k)).then(r=>setFilms(r.films)).catch(()=>setFilms([]));},[ids,k]);
+ if(!ids.length||!films||!films.length)return null;const f:CFilm={...films[0],dub:films.some(x=>x.dub),sub:films.some(x=>x.sub),shows:films.flatMap(x=>x.shows).sort((a,b)=>(a.date+a.time).localeCompare(b.date+b.time))};
+ return <section className="set" aria-labelledby="h-ms"><h3 id="h-ms"><Ticket aria-hidden="true"/>הקרנות בסניפים שלך</h3>
+  <div className="chips" role="group" aria-label="סוג הקרנה" style={{marginTop:0}}><button className="chip" aria-pressed={!only} onClick={()=>setOnly('')}>הכל</button>{f.dub&&<button className="chip" aria-pressed={only==='dub'} onClick={()=>setOnly('dub')}><Mic size={16} aria-hidden="true"/>מדובב</button>}{f.sub&&<button className="chip" aria-pressed={only==='sub'} onClick={()=>setOnly('sub')}><Captions size={16} aria-hidden="true"/>כתוביות</button>}</div>
+  <ShowList f={f} only={only}/></section>;}
+function CinemaPicker(){const [all,setAll]=useState<{id:string;name:string;city:string}[]|null>(null);const [err,setErr]=useState('');const [ids,setIds]=useState<string[]>(()=>read<string[]>(LS.cinemas,[]));
+ useEffect(()=>{api<{cinemas:{id:string;name:string;city:string}[]}>('/api/cinemas').then(r=>setAll(r.cinemas)).catch(e=>setErr(e.message));},[]);
+ const toggle=(id:string)=>{const n=ids.includes(id)?ids.filter(x=>x!==id):[...ids,id].slice(-3);setIds(n);write(LS.cinemas,n);};
+ return <section className="set" aria-labelledby="h-cp"><h3 id="h-cp"><MapPin aria-hidden="true"/>סניפי קולנוע</h3><p className="setNote" style={{marginTop:0}}>עד 3 סניפי פלאנט, להקרנות מדובבות ועם כתוביות.</p>
+  {err&&<p className="setNote" role="alert">{err}</p>}{!all&&!err&&<p className="setNote" role="status">טוען סניפים…</p>}
+  {all&&<div className="chips wrap" role="group" aria-labelledby="h-cp">{all.map(c=><button key={c.id} className="chip" aria-pressed={ids.includes(c.id)} onClick={()=>toggle(c.id)}>{c.name}</button>)}</div>}
+  {ids.length>0&&<p className="setNote" role="status">נבחרו {ids.length} מתוך 3</p>}</section>;}
+function NotifySettings({items}:{items:Item[]}){const [st,setSt]=useState(()=>read<{on:boolean;prefs:{ep:boolean;he:boolean;movie:boolean}}>(LS.notif,{on:false,prefs:{ep:true,he:true,movie:true}}));const [msg,setMsg]=useState('');const [busy,setBusy]=useState(false);
+ const supported=typeof window!=='undefined'&&'serviceWorker' in navigator&&'PushManager' in window;const standalone=typeof window!=='undefined'&&(matchMedia('(display-mode: standalone)').matches||(navigator as {standalone?:boolean}).standalone===true);
+ const save=(n:typeof st)=>{setSt(n);write(LS.notif,n);};
+ const post=(b:object)=>api<{ok:boolean}>('/api/push',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({device:deviceId(),...b})});
+ const follows=()=>items.filter(i=>i.status!=='dropped').slice(0,400).map(i=>({key:i.key,title:i.title.slice(0,200),status:i.status,media:i.media}));
+ const enable=async()=>{setBusy(true);setMsg('');try{const k=await api<{enabled:boolean;publicKey:string}>('/api/push');if(!k.enabled)throw new Error('ההתראות עוד לא מחוברות בשרת (חסר מסד נתונים).');
+   if(await Notification.requestPermission()!=='granted')throw new Error('לא התקבל אישור להתראות. אפשר לאשר בהגדרות האייפון.');
+   const reg=await navigator.serviceWorker.register('/sw.js');await navigator.serviceWorker.ready;const key=Uint8Array.from(atob(k.publicKey.replace(/-/g,'+').replace(/_/g,'/')+'=='.slice(0,(4-k.publicKey.length%4)%4)),c=>c.charCodeAt(0));
+   const sub=await reg.pushManager.getSubscription()||await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+   await post({subscription:sub.toJSON(),items:follows(),prefs:st.prefs});save({...st,on:true});setMsg('ההתראות פעילות. נשלחה התראת בדיקה.');}catch(e){setMsg(e instanceof Error?e.message:'לא ניתן להפעיל כרגע.');}finally{setBusy(false);}};
+ const disable=async()=>{setBusy(true);try{await post({remove:true});const reg=await navigator.serviceWorker.getRegistration();await (await reg?.pushManager.getSubscription())?.unsubscribe();}catch{}save({...st,on:false});setMsg('ההתראות כבויות.');setBusy(false);};
+ const pref=(k:'ep'|'he'|'movie',v:boolean)=>{const n={...st,prefs:{...st.prefs,[k]:v}};save(n);if(n.on)post({prefs:n.prefs}).catch(()=>{});};
+ return <section className="set" aria-labelledby="h-nt"><h3 id="h-nt"><Bell aria-hidden="true"/>התראות</h3>
+  {!supported?<p className="setNote">הדפדפן הזה לא תומך בהתראות.</p>:!standalone&&!st.on?<p className="setNote">באייפון, התראות עובדות רק מהאפליקציה שעל מסך הבית. פתח את Unwatch משם.</p>:null}
+  {supported&&(st.on?<button className="ghost full" style={{marginTop:0}} onClick={disable} disabled={busy}><BellOff aria-hidden="true"/>כיבוי התראות</button>:<button className="primary full" style={{marginTop:0}} onClick={enable} disabled={busy}><Bell aria-hidden="true"/>{busy?'מפעיל…':'הפעלת התראות'}</button>)}
+  {([['ep','פרק חדש יצא','לסדרות שאתה צופה בהן, ובשעה המדויקת לאנימה'],['he','הגיע דיבוב או כתוביות בעברית','לכותרים ברשימה ובצפייה'],['movie','סרט מהרשימה יצא','בקולנוע בישראל או בשירות צפייה']] as const).map(([k,t,d])=>
+   <label key={k} className="swRow"><span><b>{t}</b><small>{d}</small></span><input type="checkbox" role="switch" className="sw" checked={st.prefs[k]} onChange={e=>pref(k,e.target.checked)}/></label>)}
+  {st.on&&<button className="ghost full" onClick={()=>post({test:true}).then(()=>setMsg('נשלחה התראת בדיקה.')).catch(e=>setMsg(e.message))}>שליחת התראת בדיקה</button>}
+  <p className="setNote">לא נשלחות התראות בין 23:00 ל-9:00 - הן מחכות לבוקר.</p>
+  {msg&&<p className="setNote" role="status">{msg}</p>}</section>;}

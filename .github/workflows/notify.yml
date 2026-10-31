@@ -1,0 +1,11 @@
+name: Unwatch notifications
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - run: curl -fsS --max-time 90 https://unwatch-one.vercel.app/api/cron
