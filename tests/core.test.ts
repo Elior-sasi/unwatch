@@ -135,3 +135,13 @@ test('HOT screening language',()=>{
  assert.equal(hotType({DubbedLanguage:null,SubtitledLanguage:'עברית'}),'sub');
  assert.equal(hotType({DubbedLanguage:'רוסית',SubtitledLanguage:null}),'orig');
 });
+import {dayDate,parseSeret} from '../lib/cinema';
+test('seret.co.il theatre page (Cinema City)',()=>{
+ assert.equal(dayDate('שבת','2026-10-30'),'2026-10-31');assert.equal(dayDate("יום א'",'2026-10-30'),'2026-11-01');assert.equal(dayDate('היום','2026-10-30'),'2026-10-30');assert.equal(dayDate('שישי','2026-10-30'),'2026-10-30');
+ const html='<div><a href="s_movies.asp?MID=900"><img src="x"></a><a href="s_movies.asp?MID=900">פיניק</a> <span>חדש</span><table><tr><td>שישי</td><td>19:00<br>אולם 3<br>צפי סיום: 20:40</td></tr><tr><td>שבת</td><td>11:50<br>מדובב<br>אולם 8צפי סיום: 13:33</td><td>14:00 אולם 2</td><td>00:10* אולם 14</td></tr></table>'
+  +'<a href="https://www.seret.co.il/movies/s_movies.asp?MID=901">שם קוד טהרן</a><p>יום א\'</p><p>16:40 אולם 12</p></div>';
+ const r=parseSeret(html,'2026-10-30');
+ assert.deepEqual(r.map(f=>f.name),['פיניק','שם קוד טהרן']);
+ assert.deepEqual(r[0].shows.map(s=>s.date+' '+s.time+(s.dub?' dub':'')+' '+s.hall),['2026-10-30 19:00 3','2026-10-31 11:50 dub 8','2026-10-31 14:00 2','2026-11-01 00:10 14']);
+ assert.deepEqual(r[1].shows.map(s=>s.date+' '+s.time),['2026-11-01 16:40']);
+});

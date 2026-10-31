@@ -33,7 +33,7 @@ export const norm=(t:string)=>cleanName(t).toLowerCase().replace(/[^\p{L}\p{N}]+
 export async function cinemas():Promise<(Cinema&{chain:string})[]>{const until=iso(new Date(Date.now()+30*864e5));
  const all=await Promise.all((Object.keys(CHAINS) as Chain[]).map(async ch=>{try{const b=await get<{cinemas:{id:string;displayName:string;addressInfo?:{city?:string}}[]}>('cinemas/with-event/until/'+until+'?attr=&lang=he_IL',24*3600,ch);
    return (b.cinemas||[]).map(c=>({id:ch+':'+c.id,chain:CHAINS[ch].name,name:c.displayName.replace(CHAINS[ch].strip,'').trim()||c.displayName,city:c.addressInfo?.city||''}));}catch{return [];}}));
- const hot=await hotCinemas().catch(()=>[]);
+ const hot=[...await hotCinemas().catch(()=>[]),...await ccCinemas()];
  if(!all.flat().length&&!hot.length)throw new Error('CINEMA_DOWN');
  return [...all.flat(),...hot].sort((a,b)=>a.name.localeCompare(b.name,'he'));}
 
@@ -45,6 +45,7 @@ export async function schedule(ids:string[],days=6):Promise<CinemaFilm[]>{const 
  const jobs=ids.slice(0,3).map(c=>/^\d+$/.test(c)?'p:'+c:c).flatMap(c=>dates.map(d=>({c,d})));let i=0;
  await Promise.all(Array.from({length:6},async()=>{while(i<jobs.length){const {c,d}=jobs[i++];
   if(c.startsWith('hot:')){await hotDay(c,d,names.get(c)||'',films);continue;}
+  if(c.startsWith('cc:')){await ccDay(c,d,names.get(c)||'',films);continue;}
   try{const sp=splitId(c);const b=await get<{films:VFilm[];events:VEvent[]}>('film-events/in-cinema/'+sp.id+'/at-date/'+d+'?attr=&lang=he_IL',1800,sp.chain);
    const fm=new Map((b.films||[]).map(f=>[f.id,f]));
    for(const e of b.events||[]){const f=fm.get(e.filmId);if(!f)continue;const cls=classify([...(e.attributeIds||[]),...(f.attributeIds||[])],f.name);
@@ -80,3 +81,36 @@ async function hotDay(c:string,date:string,name:string,films:Map<string,CinemaFi
     cur.shows.push({cinema:(name||'HOT')+' (HOT)',date,time:(d.Hour||d.Date.slice(11,16)).slice(0,5),type,lang:null,format:[d.Is3D?'3D':'',d.IsAtmos?'ATMOS':'',d.IsVIP?'VIP':''].filter(Boolean),link:HOT+'/theater/'+id,hall:null,soldOut:false});
     if(type==='dub')cur.dub=true;if(type==='sub')cur.sub=true;}
    if(cur.shows.length)films.set(key,cur);}}catch{}}
+
+// Cinema City: its own ticket site blocks outside requests, so its schedule is read from seret.co.il,
+// which lists every Cinema City branch with times and marks dubbed screenings ("מדובב").
+const SERET='https://www.seret.co.il/movies/';
+export const CC_TIDS:Record<string,string>={'112':'גלילות','154':'ראשון לציון','170':'ירושלים','178':'כפר סבא','209':'נתניה','229':'באר שבע','235':'חדרה','240':'אשדוד'};
+const DAY:Record<string,number>={'ראשון':0,'א':0,'שני':1,'ב':1,'שלישי':2,'ג':2,'רביעי':3,'ד':3,'חמישי':4,'ה':4,'שישי':5,'ו':5,'שבת':6,'ש':6};
+const text=(h:string)=>h.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/gi,' ').replace(/<br\s*\/?>/gi,' ').replace(/<[^>]+>/g,' | ').replace(/&nbsp;/g,' ').replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&amp;/g,'&');
+// The date of a weekday name within the coming week (today counts as the first day).
+export function dayDate(word:string,today:string):string|null{const w=word.replace(/^יום\s+/,'').replace(/['׳"״]/g,'').trim();if(w==='היום')return today;const d=DAY[w];if(d===undefined)return null;
+ const t=new Date(today+'T12:00:00Z');const add=(d-t.getUTCDay()+7)%7;return new Date(t.getTime()+add*864e5).toISOString().slice(0,10);}
+// One theatre page: film title links (s_movies.asp?MID=) followed by days, times, "מדובב" and hall numbers.
+export function parseSeret(html:string,today:string):{mid:string;name:string;shows:{date:string;time:string;dub:boolean;hall:string|null}[]}[]{
+ const parts=[...html.matchAll(/<a[^>]+href=["'][^"']*s_movies\.asp\?MID=(\d+)[^"']*["'][^>]*>([^<]{2,120})<\/a>/gi)];const out:{mid:string;name:string;shows:{date:string;time:string;dub:boolean;hall:string|null}[]}[]=[];
+ for(let i=0;i<parts.length;i++){const m=parts[i];const name=m[2].replace(/\s+/g,' ').trim();if(!name||/^\d+$/.test(name))continue;
+  const start=(m.index||0)+m[0].length;const end=i+1<parts.length?(parts[i+1].index||html.length):html.length;
+  const toks=text(html.slice(start,end)).replace(/צפי\s*סיום:?\s*(?:[01]\d|2[0-3]):[0-5]\d(?:\s*\(\+1\))?/g,' ').split('|').map(x=>x.replace(/\s+/g,' ').trim()).filter(Boolean);let day:string|null=null;const shows:{date:string;time:string;dub:boolean;hall:string|null}[]=[];
+  for(const tk of toks){for(const piece of tk.split(/(?=(?:[01]\d|2[0-3]):[0-5]\d)/)){const p=piece.trim();
+   const dw=p.match(/^(?:היום|(?:יום\s+)?(?:ראשון|שני|שלישי|רביעי|חמישי|שישי|שבת|[אבגדהוש]['׳]?))(?=\s|$)/);if(dw){const d=dayDate(dw[0],today);if(d)day=d;}
+   const tm=p.match(/^((?:[01]\d|2[0-3]):[0-5]\d)(\*)?/);
+   if(tm&&day){const date=tm[2]?new Date(new Date(day+'T12:00:00Z').getTime()+864e5).toISOString().slice(0,10):day;shows.push({date,time:tm[1],dub:false,hall:(p.match(/אולם\s*(\d+)/)||[])[1]||null});}
+   const last=shows[shows.length-1];if(last&&!tm){if(/מדובב/.test(p))last.dub=true;const h=p.match(/אולם\s*(\d+)/);if(h&&!last.hall)last.hall=h[1];}
+   if(tm&&/מדובב/.test(p))shows[shows.length-1].dub=true;}}
+  const prev=out.find(f=>f.mid===m[1]);if(prev)prev.shows.push(...shows);else if(shows.length)out.push({mid:m[1],name,shows});}
+ return out;}
+async function ccCinemas():Promise<(Cinema&{chain:string})[]>{return Object.entries(CC_TIDS).map(([id,n])=>({id:'cc:'+id,chain:'סינמה סיטי',name:n,city:''}));}
+const ccPages=new Map<string,Promise<string>>();
+async function ccDay(c:string,date:string,name:string,films:Map<string,CinemaFilm>){const tid=c.slice(3);
+ try{const url=SERET+'s_theatres.asp?TID='+tid;let p=ccPages.get(url);if(!p){p=fetch(url,{headers:{'user-agent':'Mozilla/5.0 Unwatch (personal)','accept-language':'he-IL'},next:{revalidate:3600}}).then(r=>{if(!r.ok)throw new Error('SERET_'+r.status);return r.text();});ccPages.set(url,p);setTimeout(()=>ccPages.delete(url),60e3);}
+  const today=iso(new Date());for(const f of parseSeret(await p,today)){const key=norm(f.name)||'cc'+f.mid;
+   const cur=films.get(key)||{id:'cc'+f.mid,name:cleanName(f.name)||f.name,year:null,poster:null,length:null,link:SERET+'s_movies.asp?MID='+f.mid,dub:false,sub:false,shows:[]};let any=false;
+   for(const s of f.shows){if(s.date!==date)continue;const type:Show['type']=s.dub||DUB_NAME.test(f.name)?'dub':'orig';any=true;
+    cur.shows.push({cinema:(name||'סינמה סיטי')+' (סינמה סיטי)',date,time:s.time,type,lang:null,format:[],link:'https://www.cinema-city.co.il/',hall:s.hall?'אולם '+s.hall:null,soldOut:false});if(type==='dub')cur.dub=true;}
+   if(any)films.set(key,cur);}}catch{}}
