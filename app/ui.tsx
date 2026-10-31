@@ -36,7 +36,10 @@ const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMo
 // Opening: the U is drawn like a progress bar, the screen switches on like an old TV (a thin line that opens up),
 // then the play button appears. Loading: the U keeps filling like a progress bar. SVG's own animation, which iPhone plays reliably;
 // with "reduce motion" the still logo is shown.
-function useReduced(){const [r,setR]=useState(false);useEffect(()=>{const m=matchMedia('(prefers-reduced-motion: reduce)');setR(m.matches);const f=()=>setR(m.matches);m.addEventListener('change',f);return ()=>m.removeEventListener('change',f);},[]);return r;}
+// The logo animation follows the app's own setting: always (default, like Unbox), off, or as the iPhone's "Reduce Motion" says.
+type AnimPref='on'|'auto'|'off';
+const stillLogo=()=>{const p=read<AnimPref>('unwatch:anim','on');return p==='off'||(p==='auto'&&matchMedia('(prefers-reduced-motion: reduce)').matches);};
+function useReduced(){const [r,setR]=useState(false);useEffect(()=>{const m=matchMedia('(prefers-reduced-motion: reduce)');const f=()=>setR(stillLogo());f();m.addEventListener('change',f);return ()=>m.removeEventListener('change',f);},[]);return r;}
 export function Mark({className,anim,play}:{className?:string;anim?:'open'|'bob';play?:boolean}){const still=useReduced();const a=still?undefined:anim;const ref=useRef<SVGSVGElement>(null);
  useEffect(()=>{if(play&&ref.current){try{ref.current.setCurrentTime(0);ref.current.unpauseAnimations();}catch{}}},[play]);
  return <svg ref={ref} className={className} viewBox="100 76 312 386" aria-hidden="true">
@@ -74,7 +77,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
 
  useEffect(()=>{setItems(read(LS.lib,[]));setRemoved(read(LS.removed,{}));setShows(read(LS.shows,{}));setTab(read(LS.tab,'up'));setSize(read(LS.size,''));setFills(read(LS.filler,{}));setSpoil(read(LS.spoil,true));setReady(true);
   // The opening animation starts only once the app is really showing (two frames after it is drawn), then fades out.
-  const quick=matchMedia('(prefers-reduced-motion: reduce)').matches;requestAnimationFrame(()=>requestAnimationFrame(()=>{setGo(true);setTimeout(()=>setSplash(1),quick?400:2700);setTimeout(()=>setSplash(0),quick?800:3150);}));
+  const quick=stillLogo();requestAnimationFrame(()=>requestAnimationFrame(()=>{setGo(true);setTimeout(()=>setSplash(1),quick?400:2700);setTimeout(()=>setSplash(0),quick?800:3150);}));
   api<{tmdb:boolean;db:boolean}>('/api/status').then(setStatus).catch(()=>{});},[]);
  // Notifications: the service worker, and a tapped notification opening its title.
  useEffect(()=>{if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
@@ -322,6 +325,7 @@ function SettingsSheet({spoil,setSpoil,close,size,setSize,user,canLogin,login,lo
  status:{tmdb:boolean;db:boolean}|null;syncing:boolean;sync:()=>void;items:Item[];restore:(l:Item[])=>void}){const ref=useSheet(close);const file=useRef<HTMLInputElement>(null);const [msg,setMsg]=useState('');
  const backup=()=>{const b=new Blob([JSON.stringify({app:'unwatch',v:1,items},null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='unwatch-'+todayISO()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),3000);};
  return <div className="sheet" role="dialog" aria-modal="true" aria-label="הגדרות"><div className="sheetTop"><h2 style={{margin:0}}>הגדרות</h2><button ref={ref} className="ib" aria-label="סגירה" onClick={close}><X/></button></div>
+  <AnimSetting/>
   <section className="set" aria-labelledby="h-size"><h3 id="h-size">גודל טקסט</h3><div className="seg" role="group" aria-labelledby="h-size">{([['','רגיל'],['large','גדול'],['xlarge','גדול מאוד']] as const).map(([v,t])=><button key={t} aria-pressed={size===v} onClick={()=>setSize(v)}>{t}</button>)}</div></section>
   <NotifySettings items={items}/>
   <CinemaPicker/>
@@ -416,3 +420,8 @@ function NotifySettings({items}:{items:Item[]}){const [st,setSt]=useState(()=>re
   {st.on&&<button className="ghost full" onClick={()=>post({test:true}).then(()=>setMsg('נשלחה התראת בדיקה.')).catch(e=>setMsg(e.message))}>שליחת התראת בדיקה</button>}
   <p className="setNote">לא נשלחות התראות בין 23:00 ל-9:00 - הן מחכות לבוקר.</p>
   {msg&&<p className="setNote" role="status">{msg}</p>}</section>;}
+
+function AnimSetting(){const [v,setV]=useState<AnimPref>(()=>read<AnimPref>('unwatch:anim','on'));const set=(x:AnimPref)=>{setV(x);write('unwatch:anim',x);};
+ return <section className="set" aria-labelledby="h-anim"><h3 id="h-anim">אנימציית פתיחה וטעינה</h3>
+  <div className="seg" role="group" aria-labelledby="h-anim">{([['on','תמיד'],['auto','לפי האייפון'],['off','כבויה']] as const).map(([k,t])=><button key={k} aria-pressed={v===k} onClick={()=>set(k)}>{t}</button>)}</div>
+  <p className="setNote">"לפי האייפון" מכבה אותה כשמופעלת "הפחתת תנועה" בהגדרות הנגישות.</p></section>;}

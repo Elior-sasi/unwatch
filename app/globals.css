@@ -191,3 +191,4 @@ a.watch{margin-top:8px;min-height:46px;color:#e3dbff}
 .splash{animation:splashOut .45s 7s ease forwards}
 @keyframes splashOut{to{opacity:0;visibility:hidden}}
 @media(prefers-reduced-motion:reduce){.splash.go .sname{opacity:1}}
+.splash.go .sname{opacity:1}
