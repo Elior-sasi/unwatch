@@ -37,8 +37,9 @@ const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMo
 // then the play button appears. Loading: the U keeps filling like a progress bar. SVG's own animation, which iPhone plays reliably;
 // with "reduce motion" the still logo is shown.
 function useReduced(){const [r,setR]=useState(false);useEffect(()=>{const m=matchMedia('(prefers-reduced-motion: reduce)');setR(m.matches);const f=()=>setR(m.matches);m.addEventListener('change',f);return ()=>m.removeEventListener('change',f);},[]);return r;}
-export function Mark({className,anim}:{className?:string;anim?:'open'|'bob'}){const still=useReduced();const a=still?undefined:anim;
- return <svg className={className} viewBox="100 76 312 386" aria-hidden="true">
+export function Mark({className,anim,play}:{className?:string;anim?:'open'|'bob';play?:boolean}){const still=useReduced();const a=still?undefined:anim;const ref=useRef<SVGSVGElement>(null);
+ useEffect(()=>{if(play&&ref.current){try{ref.current.setCurrentTime(0);ref.current.unpauseAnimations();}catch{}}},[play]);
+ return <svg ref={ref} className={className} viewBox="100 76 312 386" aria-hidden="true">
  <defs><linearGradient id="uw-g" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stopColor="#7c4dff"/><stop offset="1" stopColor="#c4a8ff"/></linearGradient></defs>
  <path d="M150 214 V320 a106 106 0 0 0 212 0 V210" fill="none" stroke="url(#uw-g)" strokeWidth="58" strokeLinecap="round" pathLength={100} strokeDasharray={a?'100 100':undefined}>
   {a==='open'&&<animate attributeName="stroke-dashoffset" values="100;0" dur=".8s" calcMode="spline" keySplines=".3 0 .2 1" fill="freeze"/>}
@@ -68,11 +69,12 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
  const [openKey,setOpenKey]=useState<string|null>(null);const [hit,setHit]=useState<Hit|null>(null);const [searching,setSearching]=useState(false);const [settings,setSettings]=useState(false);
  const [toast,setToast]=useState<{text:string;undo?:()=>void}|null>(null);const [status,setStatus]=useState<{tmdb:boolean;db:boolean}|null>(null);
  const [fills,setFills]=useState<Record<string,Fill>>({});const [spoil,setSpoil]=useState(true);const [freeMin,setFreeMin]=useState(0);const [stats,setStats]=useState(false);
- const [splash,setSplash]=useState(2);const [syncing,setSyncing]=useState(false);
+ const [splash,setSplash]=useState(2);const [go,setGo]=useState(false);const [syncing,setSyncing]=useState(false);
  const synced=useRef(false);const pending=useRef<ReturnType<typeof setTimeout>|null>(null);
 
  useEffect(()=>{setItems(read(LS.lib,[]));setRemoved(read(LS.removed,{}));setShows(read(LS.shows,{}));setTab(read(LS.tab,'up'));setSize(read(LS.size,''));setFills(read(LS.filler,{}));setSpoil(read(LS.spoil,true));setReady(true);
-  const quick=matchMedia('(prefers-reduced-motion: reduce)').matches;setTimeout(()=>setSplash(0),quick?500:3000);
+  // The opening animation starts only once the app is really showing (two frames after it is drawn), then fades out.
+  const quick=matchMedia('(prefers-reduced-motion: reduce)').matches;requestAnimationFrame(()=>requestAnimationFrame(()=>{setGo(true);setTimeout(()=>setSplash(1),quick?400:2700);setTimeout(()=>setSplash(0),quick?800:3150);}));
   api<{tmdb:boolean;db:boolean}>('/api/status').then(setStatus).catch(()=>{});},[]);
  // Notifications: the service worker, and a tapped notification opening its title.
  useEffect(()=>{if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
@@ -141,7 +143,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
   onTouchMove={e=>{if(startY.current==null||pull<0)return;const d=e.touches[0].clientY-startY.current;setPull(d>0?Math.min(d/2,90):0);}}
   onTouchEnd={()=>{if(pull>=70)refresh();else if(pull>0)setPull(0);startY.current=null;}}>
   {pull!==0&&<div className="ptr" style={{height:pull<0?56:pull}} aria-hidden="true"><RefreshCw className={pull<0?'spin':''} style={{transform:pull>0?'rotate('+pull*3+'deg)':undefined,opacity:pull<0?1:Math.min(1,pull/70)}}/></div>}
-  {splash>0&&<div className={'splash'+(splash===1?' out':'')} aria-hidden="true" onAnimationEnd={e=>{if(e.target===e.currentTarget)setSplash(0);}}><Mark className="smark" anim="open"/><div className="sname" dir="ltr">Unwatch</div></div>}
+  {splash>0&&<div className={'splash'+(go?' go':'')+(splash===1?' out':'')} aria-hidden="true" onAnimationEnd={e=>{if(e.target===e.currentTarget&&e.animationName==='splashOut')setSplash(0);}}><Mark className="smark" anim="open" play={go}/><div className="sname" dir="ltr">Unwatch</div></div>}
   <header className="row">
    <div className="brand" role="img" aria-label="Unwatch"><Mark/><span aria-hidden="true">nwatch</span></div>
    <div className="actions"><button className="ib" aria-label="חיפוש והוספה" onClick={()=>setSearching(true)}><Search/></button><button className="ib" aria-label="הגדרות" onClick={()=>setSettings(true)}><Settings/></button></div>

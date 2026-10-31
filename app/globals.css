@@ -101,18 +101,13 @@ details.fold summary::-webkit-details-marker{display:none}details.fold>div{paddi
 
 .splash{position:fixed;inset:0;z-index:2147483000;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;transition:opacity .4s ease}
 .splash.out{opacity:0;pointer-events:none}.splash svg{width:132px;height:auto;overflow:visible}
-.splash .lid{animation:lid .7s .15s cubic-bezier(.3,1.4,.5,1) both}.splash .u{animation:sin .5s ease-out both}
-.splash .sname{font-size:34px;font-weight:700;letter-spacing:-.3px;color:#f1ecff;animation:sin .6s .35s ease-out both}
+.splash .sname{font-size:34px;font-weight:700;letter-spacing:-.3px;color:#f1ecff}
 @keyframes lid{from{transform:translateY(-40px);opacity:0}to{transform:none;opacity:1}}
 @keyframes sin{from{opacity:0;transform:scale(.85)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 /* motion - all of it is switched off by "reduce motion" above */
 .splash .smark{width:132px;height:auto;overflow:visible}
-.splash .smark .u{animation:uIn .5s ease-out both;transform-origin:50% 100%;transform-box:fill-box}
-.splash .smark .lid{animation:lidDrop .75s .25s cubic-bezier(.3,1.5,.5,1) both;transform-box:fill-box;transform-origin:50% 100%}
-.splash .smark .lid path{animation:playPulse .5s 1s ease-out both;transform-box:fill-box;transform-origin:50% 50%}
-.splash .sname{animation:sin .55s .55s ease-out both}
 @keyframes uIn{from{opacity:0;transform:translateY(16px) scaleY(.8)}to{opacity:1;transform:none}}
 @keyframes lidDrop{0%{opacity:0;transform:translateY(-70px) rotate(-14deg)}60%{opacity:1}100%{transform:none}}
 @keyframes playPulse{0%{transform:scale(1)}45%{transform:scale(1.45)}100%{transform:scale(1)}}
@@ -142,10 +137,7 @@ details.fold summary::-webkit-details-marker{display:none}details.fold>div{paddi
 .chip,.seg button{transition:background .2s,border-color .2s,color .2s}
 nav button .ni svg{transition:transform .25s cubic-bezier(.3,1.6,.5,1)}nav button.selected .ni svg{transform:translateY(-1px) scale(1.12)}
 /* The opening screen runs on its own clock from its first paint (iPhone can keep the launch screen black for a moment). */
-.splash{animation:splashOut .45s 2.4s ease forwards}
 @keyframes splashOut{to{opacity:0;visibility:hidden}}
-.splash .smark .u{animation-delay:.1s}.splash .smark .lid{animation-delay:.4s}.splash .smark .lid path{animation-delay:1.15s}.splash .sname{animation-delay:.7s}
-@media(prefers-reduced-motion:reduce){.splash{animation:none!important}}
 
 /* Hebrew + where to watch */
 .yn{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -192,4 +184,10 @@ a.watch{margin-top:8px;min-height:46px;color:#e3dbff}
 .show .pill{grid-column:2;justify-self:start}
 .set>.primary.full,.set>.ghost.full{margin-bottom:8px}
 .brand svg{height:1.5em;margin:0 0 -.12em 0}
-.splash .smark{width:132px;animation:sin .5s ease-out both}
+
+/* Opening screen: hidden until the app is on screen (iPhone may show black for a moment first), then played from the start. */
+.splash svg,.splash .sname{opacity:0}
+.splash.go svg{opacity:1}.splash.go .sname{animation:sin .6s .75s ease-out both}
+.splash{animation:splashOut .45s 7s ease forwards}
+@keyframes splashOut{to{opacity:0;visibility:hidden}}
+@media(prefers-reduced-motion:reduce){.splash.go .sname{opacity:1}}
