@@ -7,11 +7,11 @@ function around(t:string,words:string[],n=2,w=150){const out:string[]=[];for(con
 async function look(url:string,words:string[],extra?:(t:string)=>string){try{const {r,t}=await text(url);return url+'\n  '+r.status+' '+t.length+'b'+(t.trim().startsWith('{')||t.trim().startsWith('[')?'\n  JSON: '+t.slice(0,400):'')+'\n  '+around(t,words).join('\n  ')+(extra?'\n  '+extra(t):'');}
  catch(e){return url+'\n  ERR '+(e instanceof Error?e.message:'');}}
 const scripts=(t:string)=>'scripts: '+[...new Set([...t.matchAll(/<script[^>]+src=["']([^"']+)/g)].map(m=>m[1]).filter(s=>!/google|facebook|gtm|analytics|hotjar|clarity|jquery|bootstrap|popper|polyfill|modernizr/.test(s)))].join(' ');
+const urls=(t:string)=>'urls: '+[...new Set([...t.matchAll(/["'`]((?:https?:)?\/[^"'`\s]{0,40}(?:api|ajax|Order|order|Theater|theater|Movie|movie|Event|event|Show|show|Session|session|Schedule|schedule|Present|present)[^"'`\s]{0,80})["'`]/g)].map(m=>m[1]))].slice(0,40).join('\n    ');
 export async function GET(){const out=await Promise.all([
- look('https://www.rav-hen.co.il/',['quickbook','data-api-service','tenant','apiSitePrefix','10104'],scripts),
- look('https://www.rav-hen.co.il/xmedia/js/config.js?v=v2.8.116-dirty',['quickbook','data-api','tenant','api','prefix']),
- look('https://www.hotcinema.co.il/',['ajax','url:','$.get','$.post','fetch(','/api/','movieId','data-id'],scripts),
- look('https://ticket.lev.co.il/',['api','json','מדובב','session','ajax','url:'],scripts),
- look('https://events.lev.co.il/',['api','json','מדובב','session','ajax'],scripts),
- look('https://www.cinema-city.co.il/movie-categories/now-playing',['sessionId','booking','tickets.cinema-city'])]);
+ look('https://www.hotcinema.co.il/js/movie-order.js',['url','ajax','axios','fetch('],urls),
+ look('https://www.hotcinema.co.il/js/theater-order.js',['url','ajax','axios','fetch('],urls),
+ look('https://events.lev.co.il/wp-content/themes/lev/ajax_data.php?clang=he',['מדובב','date','time']),
+ look('https://events.lev.co.il/wp-content/themes/lev/js/script.js',['ajax_data_url','ajax','action'],urls),
+ look('https://ticket.lev.co.il/_nuxt/f5be03c.js',['baseURL','api'],urls)]);
  return new Response(out.join('\n\n'),{headers:{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'}});}
