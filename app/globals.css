@@ -191,3 +191,5 @@ a.watch{margin-top:8px;min-height:46px;color:#e3dbff}
 .show.dub{border-color:#1f5a46}.show.dub .tp{color:#8cf0c6}.show.sub{border-color:#4c3d8f}.show.sub .tp{color:#cfc3ff}
 .show .pill{grid-column:2;justify-self:start}
 .set>.primary.full,.set>.ghost.full{margin-bottom:8px}
+.brand svg{height:1.5em;margin:0 0 -.12em 0}
+.splash .smark{width:132px;animation:sin .5s ease-out both}

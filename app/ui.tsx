@@ -32,11 +32,16 @@ const logWatch=(it:Item,min:number,n=1)=>{const l=read<Log[]>(LS.log,[]);l.push(
 const deviceId=()=>{let d=read<string>(LS.device,'');if(!d){const a=new Uint8Array(18);crypto.getRandomValues(a);d=btoa(String.fromCharCode(...a)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');write(LS.device,d);}return d;};
 const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 
-export function Mark({className}:{className?:string}){return <svg className={className} viewBox="40 40 100 110" aria-hidden="true">
- <defs><linearGradient id="mk-p" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#c4a8ff"/><stop offset="1" stopColor="#7c4dff"/></linearGradient></defs>
- <g className="lid"><rect x="44" y="44" width="92" height="26" rx="7" fill="url(#mk-p)"/><path d="M83 49.5 L101 57 L83 64.5Z" fill="#fff" stroke="#fff" strokeWidth="3" strokeLinejoin="round"/></g>
- <path className="u" d="M62 84 V112 a28 28 0 0 0 56 0 V84" fill="none" stroke="#fff" strokeWidth="22" strokeLinecap="round"/></svg>;}
-function Loader({text}:{text:string}){return <div className="loader" role="status"><Mark className="lmark"/><p>{text}</p></div>;}
+// The family mark (like Unbox, Unstage, Unroute): a gradient U, with a purple screen and play button as its lid.
+// Animated with SVG's own animation, which iPhone plays reliably.
+export function Mark({className,anim}:{className?:string;anim?:'open'|'bob'}){return <svg className={className} viewBox="100 76 312 386" aria-hidden="true">
+ <defs><linearGradient id="uw-g" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stopColor="#7c4dff"/><stop offset="1" stopColor="#c4a8ff"/></linearGradient></defs>
+ <path d="M150 214 V320 a106 106 0 0 0 212 0 V210" fill="none" stroke="url(#uw-g)" strokeWidth="58" strokeLinecap="round"/>
+ <g>{anim==='bob'&&<animateTransform attributeName="transform" type="translate" values="0 40;0 -26;0 40" dur="1.6s" repeatCount="indefinite" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1"/>}
+  {anim==='open'&&<animateTransform attributeName="transform" type="translate" values="0 56;0 0" dur=".9s" begin=".2s" fill="freeze" calcMode="spline" keySplines=".2 .9 .3 1"/>}
+  <g transform="rotate(-10 112 160)"><rect x="112" y="104" width="288" height="64" rx="18" fill="#a78bfa"/>
+   <path d="M238 120 L282 136 L238 152Z" fill="#fff" stroke="#fff" strokeWidth="8" strokeLinejoin="round"/></g></g></svg>;}
+function Loader({text}:{text:string}){return <div className="loader" role="status"><Mark className="lmark" anim="bob"/><p>{text}</p></div>;}
 function Poster({src,kind}:{src:string|null;kind:Kind}){const I=KIND_ICON[kind];return <span className="poster">{src?<img src={src} alt="" loading="lazy" decoding="async" onLoad={e=>e.currentTarget.classList.add('in')}/>:<I size={26} aria-hidden="true"/>}</span>;}
 function KindPill({kind}:{kind:Kind}){const I=KIND_ICON[kind];return <span className="pill"><I aria-hidden="true"/>{KIND_LABEL[kind]}</span>;}
 // The user's own mark wins; otherwise what was found automatically for Israeli services.
@@ -129,7 +134,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
   onTouchMove={e=>{if(startY.current==null||pull<0)return;const d=e.touches[0].clientY-startY.current;setPull(d>0?Math.min(d/2,90):0);}}
   onTouchEnd={()=>{if(pull>=70)refresh();else if(pull>0)setPull(0);startY.current=null;}}>
   {pull!==0&&<div className="ptr" style={{height:pull<0?56:pull}} aria-hidden="true"><RefreshCw className={pull<0?'spin':''} style={{transform:pull>0?'rotate('+pull*3+'deg)':undefined,opacity:pull<0?1:Math.min(1,pull/70)}}/></div>}
-  {splash>0&&<div className={'splash'+(splash===1?' out':'')} aria-hidden="true" onAnimationEnd={e=>{if(e.target===e.currentTarget)setSplash(0);}}><Mark className="smark"/><div className="sname" dir="ltr">Unwatch</div></div>}
+  {splash>0&&<div className={'splash'+(splash===1?' out':'')} aria-hidden="true" onAnimationEnd={e=>{if(e.target===e.currentTarget)setSplash(0);}}><Mark className="smark" anim="open"/><div className="sname" dir="ltr">Unwatch</div></div>}
   <header className="row">
    <div className="brand" role="img" aria-label="Unwatch"><Mark/><span aria-hidden="true">nwatch</span></div>
    <div className="actions"><button className="ib" aria-label="חיפוש והוספה" onClick={()=>setSearching(true)}><Search/></button><button className="ib" aria-label="הגדרות" onClick={()=>setSettings(true)}><Settings/></button></div>
