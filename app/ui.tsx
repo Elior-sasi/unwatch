@@ -33,14 +33,21 @@ const deviceId=()=>{let d=read<string>(LS.device,'');if(!d){const a=new Uint8Arr
 const todayISO=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 
 // The family mark (like Unbox, Unstage, Unroute): a gradient U, with a purple screen and play button as its lid.
-// Animated with SVG's own animation, which iPhone plays reliably.
-export function Mark({className,anim}:{className?:string;anim?:'open'|'bob'}){return <svg className={className} viewBox="100 76 312 386" aria-hidden="true">
+// Opening: the U is drawn like a progress bar, the screen switches on like an old TV (a thin line that opens up),
+// then the play button appears. Loading: the U keeps filling like a progress bar. SVG's own animation, which iPhone plays reliably;
+// with "reduce motion" the still logo is shown.
+function useReduced(){const [r,setR]=useState(false);useEffect(()=>{const m=matchMedia('(prefers-reduced-motion: reduce)');setR(m.matches);const f=()=>setR(m.matches);m.addEventListener('change',f);return ()=>m.removeEventListener('change',f);},[]);return r;}
+export function Mark({className,anim}:{className?:string;anim?:'open'|'bob'}){const still=useReduced();const a=still?undefined:anim;
+ return <svg className={className} viewBox="100 76 312 386" aria-hidden="true">
  <defs><linearGradient id="uw-g" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stopColor="#7c4dff"/><stop offset="1" stopColor="#c4a8ff"/></linearGradient></defs>
- <path d="M150 214 V320 a106 106 0 0 0 212 0 V210" fill="none" stroke="url(#uw-g)" strokeWidth="58" strokeLinecap="round"/>
- <g>{anim==='bob'&&<animateTransform attributeName="transform" type="translate" values="0 40;0 -26;0 40" dur="1.6s" repeatCount="indefinite" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1"/>}
-  {anim==='open'&&<animateTransform attributeName="transform" type="translate" values="0 56;0 0" dur=".9s" begin=".2s" fill="freeze" calcMode="spline" keySplines=".2 .9 .3 1"/>}
-  <g transform="rotate(-10 112 160)"><rect x="112" y="104" width="288" height="64" rx="18" fill="#a78bfa"/>
-   <path d="M238 120 L282 136 L238 152Z" fill="#fff" stroke="#fff" strokeWidth="8" strokeLinejoin="round"/></g></g></svg>;}
+ <path d="M150 214 V320 a106 106 0 0 0 212 0 V210" fill="none" stroke="url(#uw-g)" strokeWidth="58" strokeLinecap="round" pathLength={100} strokeDasharray={a?'100 100':undefined}>
+  {a==='open'&&<animate attributeName="stroke-dashoffset" values="100;0" dur=".8s" calcMode="spline" keySplines=".3 0 .2 1" fill="freeze"/>}
+  {a==='bob'&&<animate attributeName="stroke-dashoffset" values="100;0;-100" dur="1.8s" repeatCount="indefinite" calcMode="spline" keySplines=".45 0 .55 1;.45 0 .55 1"/>}</path>
+ <g transform="rotate(-10 112 160)"><rect x="112" y="104" width="288" height="64" rx="18" fill="#a78bfa">
+   {a==='open'&&<><animate attributeName="height" values="0;0;6;64" keyTimes="0;.5;.62;1" dur="1.25s" fill="freeze"/><animate attributeName="y" values="133;133;133;104" keyTimes="0;.5;.62;1" dur="1.25s" fill="freeze"/>
+    <animate attributeName="fill" values="#ffffff;#ffffff;#a78bfa" keyTimes="0;.62;1" dur="1.25s" fill="freeze"/></>}
+   {a==='bob'&&<animate attributeName="opacity" values="1;.55;1" dur="1.8s" repeatCount="indefinite"/>}</rect>
+  <path d="M238 120 L282 136 L238 152Z" fill="#fff" stroke="#fff" strokeWidth="8" strokeLinejoin="round">{a==='open'&&<animate attributeName="opacity" values="0;0;1" keyTimes="0;.8;1" dur="1.5s" fill="freeze"/>}</path></g></svg>;}
 function Loader({text}:{text:string}){return <div className="loader" role="status"><Mark className="lmark" anim="bob"/><p>{text}</p></div>;}
 function Poster({src,kind}:{src:string|null;kind:Kind}){const I=KIND_ICON[kind];return <span className="poster">{src?<img src={src} alt="" loading="lazy" decoding="async" onLoad={e=>e.currentTarget.classList.add('in')}/>:<I size={26} aria-hidden="true"/>}</span>;}
 function KindPill({kind}:{kind:Kind}){const I=KIND_ICON[kind];return <span className="pill"><I aria-hidden="true"/>{KIND_LABEL[kind]}</span>;}
@@ -65,7 +72,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
  const synced=useRef(false);const pending=useRef<ReturnType<typeof setTimeout>|null>(null);
 
  useEffect(()=>{setItems(read(LS.lib,[]));setRemoved(read(LS.removed,{}));setShows(read(LS.shows,{}));setTab(read(LS.tab,'up'));setSize(read(LS.size,''));setFills(read(LS.filler,{}));setSpoil(read(LS.spoil,true));setReady(true);
-  const quick=matchMedia('(prefers-reduced-motion: reduce)').matches;setTimeout(()=>setSplash(0),quick?500:2500);
+  const quick=matchMedia('(prefers-reduced-motion: reduce)').matches;setTimeout(()=>setSplash(0),quick?500:3000);
   api<{tmdb:boolean;db:boolean}>('/api/status').then(setStatus).catch(()=>{});},[]);
  // Notifications: the service worker, and a tapped notification opening its title.
  useEffect(()=>{if('serviceWorker' in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});

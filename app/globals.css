@@ -142,7 +142,7 @@ details.fold summary::-webkit-details-marker{display:none}details.fold>div{paddi
 .chip,.seg button{transition:background .2s,border-color .2s,color .2s}
 nav button .ni svg{transition:transform .25s cubic-bezier(.3,1.6,.5,1)}nav button.selected .ni svg{transform:translateY(-1px) scale(1.12)}
 /* The opening screen runs on its own clock from its first paint (iPhone can keep the launch screen black for a moment). */
-.splash{animation:splashOut .45s 2s ease forwards}
+.splash{animation:splashOut .45s 2.4s ease forwards}
 @keyframes splashOut{to{opacity:0;visibility:hidden}}
 .splash .smark .u{animation-delay:.1s}.splash .smark .lid{animation-delay:.4s}.splash .smark .lid path{animation-delay:1.15s}.splash .sname{animation-delay:.7s}
 @media(prefers-reduced-motion:reduce){.splash{animation:none!important}}
