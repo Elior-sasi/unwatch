@@ -8,10 +8,13 @@ async function look(url:string,words:string[],extra?:(t:string)=>string){try{con
  catch(e){return url+'\n  ERR '+(e instanceof Error?e.message:'');}}
 const scripts=(t:string)=>'scripts: '+[...new Set([...t.matchAll(/<script[^>]+src=["']([^"']+)/g)].map(m=>m[1]).filter(s=>!/google|facebook|gtm|analytics|hotjar|clarity|jquery|bootstrap|popper|polyfill|modernizr/.test(s)))].join(' ');
 const urls=(t:string)=>'urls: '+[...new Set([...t.matchAll(/["'`]((?:https?:)?\/[^"'`\s]{0,40}(?:api|ajax|Order|order|Theater|theater|Movie|movie|Event|event|Show|show|Session|session|Schedule|schedule|Present|present)[^"'`\s]{0,80})["'`]/g)].map(m=>m[1]))].slice(0,40).join('\n    ');
-export async function GET(){const out=await Promise.all([
- look('https://www.hotcinema.co.il/js/movie-order.js',['url','ajax','axios','fetch('],urls),
- look('https://www.hotcinema.co.il/js/theater-order.js',['url','ajax','axios','fetch('],urls),
- look('https://events.lev.co.il/wp-content/themes/lev/ajax_data.php?clang=he',['מדובב','date','time']),
- look('https://events.lev.co.il/wp-content/themes/lev/js/script.js',['ajax_data_url','ajax','action'],urls),
- look('https://ticket.lev.co.il/_nuxt/f5be03c.js',['baseURL','api'],urls)]);
+const opts=(t:string)=>'options: '+[...t.matchAll(/<option[^>]*value=["']?([^"' >]*)["']?[^>]*>([^<]{0,40})/g)].slice(0,30).map(m=>m[1]+'='+m[2].trim()).join(' | ');
+export async function GET(){const d=new Date();const ymd=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jerusalem'}).format(d);const [y,m,dd]=ymd.split('-');
+ const out=await Promise.all([
+ look('https://www.hotcinema.co.il/',['URLPrefix','theatreid','theaterId','data-movieid','movieid'],opts),
+ look('https://www.hotcinema.co.il/js/theater-order.js',['apiAction','site','theaterid=','selectedDate']),
+ look('https://www.hotcinema.co.il/tickets/movieevents?movieid=&date='+dd+'/'+m+'/'+y+'&theatreid=&time=&type=',['movie','time','Dub','dub']),
+ look('https://events.lev.co.il/',['locationfilterdate','locationfilter','loc'],opts),
+ look('https://events.lev.co.il/wp-content/themes/lev/ajax_data.php?clang=he&action=movie_on_location&loc=1150&date='+dd+'/'+m+'/'+y,['מדובב','href','time','שעה']),
+ look('https://events.lev.co.il/wp-content/themes/lev/ajax_data.php?clang=he&action=movie_on_location&loc=1150&date='+ymd,['מדובב','href','time','שעה'])]);
  return new Response(out.join('\n\n'),{headers:{'content-type':'text/plain; charset=utf-8','cache-control':'no-store'}});}
