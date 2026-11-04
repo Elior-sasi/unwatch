@@ -11,10 +11,14 @@ export default function MoodRecommendations({items,open}:{items:Item[];open:(key
  const [disliked,setDisliked]=useState<string[]>([]);const [single,setSingle]=useState(false);
  useEffect(()=>{try{const v=JSON.parse(localStorage.getItem('unwatch:disliked')||'[]');if(Array.isArray(v))setDisliked(v.filter((x:unknown)=>typeof x==='string'));}catch{}},[]);
  const dismiss=(key:string)=>{const next=[...new Set([...disliked,key])];setDisliked(next);try{localStorage.setItem('unwatch:disliked',JSON.stringify(next));}catch{}setResults(r=>r.filter(x=>x.key!==key));setCardIndex(0);};
+ const seenRef=useRef<Record<string,string[]>>({});const pageRef=useRef<Record<string,number>>({});
  const [mood,setMood]=useState<string>('');const [results,setResults]=useState<Suggestion[]>([]);const [loading,setLoading]=useState(false);const [error,setError]=useState('');
- async function load(next:string){setMood(next);setLoading(true);setError('');setResults([]);setCardIndex(0);
-  try{const r=await fetch('/api/recommendations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mood:next,library:items.map(i=>({key:i.key,rating:i.rating,status:i.status,kind:i.kind,title:i.title})),disliked})})});
-   const data=await r.json();if(!r.ok)throw new Error(data.error||'שגיאה');setResults(data.results||[]);
+ async function load(next:string,refresh=false){setMood(next);setLoading(true);setError('');setCardIndex(0);
+  const exclude=refresh?(seenRef.current[next]||[]):[];const page=refresh?(pageRef.current[next]||1)+1:1;
+  try{const r=await fetch('/api/recommendations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mood:next,library:items.map(i=>({key:i.key,rating:i.rating,status:i.status,kind:i.kind,title:i.title})),disliked,exclude,page})})});
+   const data=await r.json();if(!r.ok)throw new Error(data.error||'שגיאה');const incoming=(data.results||[]) as Suggestion[];
+   if(refresh&&!incoming.length){setError('אין כרגע המלצות חדשות נוספות למצב הרוח הזה.');return;}
+   setResults(incoming);pageRef.current[next]=page;seenRef.current[next]=[...new Set([...(seenRef.current[next]||[]),...incoming.map(x=>x.key)])].slice(-2000);
   }catch(e){setError(e instanceof Error?e.message:'שגיאה בטעינת המלצות');}finally{setLoading(false);}
  }
  return <section className="set" aria-labelledby="mood-heading" style={{marginTop:20}}>
@@ -26,7 +30,7 @@ export default function MoodRecommendations({items,open}:{items:Item[];open:(key
 
   {loading&&<p role="status" className="setNote">מחפש המלצות שמתאימות לך…</p>}
   {error&&<p role="alert" className="note">{error}</p>}
-  {!!results.length&&<><div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}><button className="ghost" onClick={()=>{setSingle(v=>!v);setCardIndex(0);}} style={{padding:'6px 10px',minHeight:34,fontSize:13}}><Shuffle size={15}/>{single?'כל ההמלצות':'תבחר בשבילי'}</button><button className="ghost" disabled={loading} onClick={()=>load(mood)} style={{padding:'6px 10px',minHeight:34,fontSize:13}}><RefreshCw size={15}/> רענון</button></div>
+  {!!results.length&&<><div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}><button className="ghost" onClick={()=>{setSingle(v=>!v);setCardIndex(0);}} style={{padding:'6px 10px',minHeight:34,fontSize:13}}><Shuffle size={15}/>{single?'כל ההמלצות':'תבחר בשבילי'}</button><button className="ghost" disabled={loading} onClick={()=>load(mood,true)} style={{padding:'6px 10px',minHeight:34,fontSize:13}}><RefreshCw size={15}/> רענון</button></div>
    {!single&&<div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginTop:10,gap:8}}>
     <span className="setNote" aria-live="polite">{Math.min(cardIndex+1,results.length)} מתוך {results.length}</span>
     <div style={{display:'flex',gap:6}}><button type="button" className="ghost" aria-label="ההמלצה הקודמת" disabled={cardIndex===0} onClick={()=>moveCard(-1)} style={{padding:6,minHeight:36}}><ChevronRight size={19}/></button><button type="button" className="ghost" aria-label="ההמלצה הבאה" disabled={cardIndex>=results.length-1} onClick={()=>moveCard(1)} style={{padding:6,minHeight:36}}><ChevronLeft size={19}/></button></div>
