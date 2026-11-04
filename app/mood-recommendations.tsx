@@ -44,7 +44,8 @@ export default function MoodRecommendations({items,open}:{items:Item[];open:(key
      <div style={{minWidth:0,display:'flex',flexDirection:'column',alignItems:'start',gap:6}}>
       <button type="button" onClick={()=>open(r.key,r)} style={{background:'none',border:0,color:'inherit',textAlign:'right',padding:0,font:'inherit',cursor:'pointer'}}><strong dir="auto">{r.title}</strong></button>
       <small>{r.year} · {r.kind==='anime'?'אנימה':r.media==='movie'?'סרט':'סדרה'}</small>
-      <small>{r.reason}</small>
+      <p dir="auto" style={{margin:0,fontSize:13,lineHeight:1.5,display:'-webkit-box',WebkitLineClamp:5,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{r.overview?.trim()||'אין כרגע תקציר זמין לכותר הזה.'}</p>
+      <small style={{opacity:.75}}>למה הומלץ? {r.reason}</small>
       <button type="button" onClick={()=>dismiss(r.key)} className="ghost" style={{padding:'5px 8px',minHeight:32,fontSize:12}}><ThumbsDown size={14}/> לא בשבילי</button>
      </div>
     </article>)}
