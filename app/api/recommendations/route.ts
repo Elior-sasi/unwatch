@@ -11,6 +11,8 @@ export async function POST(req:NextRequest){
   if(!moods[mood])return NextResponse.json({error:'מצב רוח לא תקין'},{status:400});
   const seeds:Seed[]=Array.isArray(body.library)?body.library.filter((x:unknown)=>x&&typeof x==='object').slice(0,100):[];
   const existing=new Set(seeds.map(s=>s.key));
+  const excluded=new Set(Array.isArray(body.exclude)?body.exclude.filter((k:unknown)=>typeof k==='string').slice(0,2000):[]);
+  const page=Math.max(1,Math.min(50,Number.isInteger(body.page)?body.page:1));
   const disliked=new Set(Array.isArray(body.disliked)?body.disliked.filter((k:unknown)=>typeof k==='string').slice(0,1000):[]);
   const preferred=seeds.filter(s=>s.rating==null||s.rating>=6).sort((a,b)=>(b.rating||0)-(a.rating||0)).slice(0,8);
   const sources=await Promise.allSettled(preferred.map(async s=>{
@@ -22,7 +24,7 @@ export async function POST(req:NextRequest){
   const pool=new Map<string,Candidate>();
   const add=(r:Raw,media:Media,bonus:number)=>{
    if(!r?.id||r.adult||!r.poster_path)return;
-   const key=media+':'+r.id;if(existing.has(key)||disliked.has(key))return;
+   const key=media+':'+r.id;if(existing.has(key)||disliked.has(key)||excluded.has(key))return;
    const genres=r.genre_ids||[];
    const wanted=moods[mood].genres.split(',').map(Number);
    const match=genres.filter(g=>wanted.includes(g)).length;
@@ -33,7 +35,7 @@ export async function POST(req:NextRequest){
   sources.forEach((s,i)=>{if(s.status==='fulfilled')s.value.forEach(r=>add(r,(r as Raw&{_media:Media})._media,10+(preferred[i]?.rating||0)));});
   const media:Media[]=mood==='anime'?['tv','movie']:['tv','movie'];
   await Promise.all(media.map(async m=>{
-   const params:Record<string,string|number>={sort_by:'popularity.desc',with_genres:moods[mood].genres.replaceAll(',', '|'),include_adult:'false',vote_count_gte:40,page:1,language:'en-US'};
+   const params:Record<string,string|number>={sort_by:'popularity.desc',with_genres:moods[mood].genres.replaceAll(',', '|'),include_adult:'false',vote_count_gte:40,page,language:'en-US'};
    if(mood==='anime'){params.with_genres='16';params.with_original_language='ja';}
    const r=await tmdb<{results:Raw[]}>('/discover/'+m,params,3600);
    r.results.forEach(x=>add(x,m,0));
