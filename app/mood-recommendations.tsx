@@ -1,0 +1,31 @@
+'use client';
+import {useState} from 'react';
+import {Sparkles,RefreshCw} from 'lucide-react';
+import type {Hit,Item} from '@/lib/types';
+const moods=[['happy','😊','משהו משמח'],['excited','🔥','אקשן'],['calm','🌿','רגוע'],['thoughtful','🧩','מחשבה ומסתורין'],['anime','✨','אנימה'],['surprise','🎲','תפתיע אותי']] as const;
+type Suggestion=Hit&{reason:string};
+export default function MoodRecommendations({items,open}:{items:Item[];open:(key:string,hit?:Hit)=>void}){
+ const [mood,setMood]=useState<string>('happy');const [results,setResults]=useState<Suggestion[]>([]);const [loading,setLoading]=useState(false);const [error,setError]=useState('');
+ async function load(next:string){setMood(next);setLoading(true);setError('');setResults([]);
+  try{const r=await fetch('/api/recommendations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mood:next,library:items.map(i=>({key:i.key,rating:i.rating,status:i.status,kind:i.kind}))})});
+   const data=await r.json();if(!r.ok)throw new Error(data.error||'שגיאה');setResults(data.results||[]);
+  }catch(e){setError(e instanceof Error?e.message:'שגיאה בטעינת המלצות');}finally{setLoading(false);}
+ }
+ return <section className="set" aria-labelledby="mood-heading" style={{marginTop:20}}>
+  <h2 id="mood-heading"><Sparkles size={22} aria-hidden="true"/> מה לראות לפי מצב הרוח?</h2>
+  <p className="setNote">המלצות אישיות לפי הספרייה שלך, כולל דברים חדשים שעוד לא הוספת.</p>
+  <div className="moodChoices" role="group" aria-label="בחירת מצב רוח" style={{display:'flex',flexWrap:'wrap',gap:8,margin:'12px 0'}}>
+   {moods.map(([id,emoji,label])=><button key={id} type="button" className={mood===id?'primary':'ghost'} aria-pressed={mood===id} disabled={loading} onClick={()=>load(id)} style={{flex:'0 1 auto',minHeight:44}}>{emoji} {label}</button>)}
+  </div>
+  {!results.length&&!loading&&!error&&<button className="primary" onClick={()=>load(mood)}><Sparkles size={18}/> מצאו לי משהו לראות</button>}
+  {loading&&<p role="status" className="setNote">מחפש המלצות שמתאימות לך…</p>}
+  {error&&<p role="alert" className="note">{error}</p>}
+  {!!results.length&&<><button className="ghost" disabled={loading} onClick={()=>load(mood)}><RefreshCw size={17}/> רענון המלצות</button>
+   <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(145px,1fr))',gap:12,marginTop:14}}>
+    {results.map(r=><button key={r.key} onClick={()=>open(r.key,r)} className="ghost" style={{display:'flex',flexDirection:'column',alignItems:'stretch',textAlign:'right',padding:8,gap:7}}>
+     {r.poster&&<img src={r.poster} alt="" loading="lazy" style={{width:'100%',aspectRatio:'2 / 3',objectFit:'cover',borderRadius:10}}/>}
+     <strong dir="auto">{r.title}</strong><small>{r.year} · {r.kind==='anime'?'אנימה':r.media==='movie'?'סרט':'סדרה'}</small><small>{r.reason}</small>
+    </button>)}
+   </div></>}
+ </section>;
+}
