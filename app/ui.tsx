@@ -1,6 +1,7 @@
 'use client';
 import {useCallback,useEffect,useId,useMemo,useRef,useState} from 'react';
 import {Bell,BellOff,MapPin,Star,ExternalLink,Clapperboard,MonitorPlay as TrailerIcon,Users,Play,CalendarClock,Library,Search,Settings,X,Check,Plus,Minus,Pause,Trash2,Tv,Film,Sparkles,Languages,Captions,Mic,ChevronDown,Ticket,Download,Upload,LogIn,LogOut,RefreshCw,Clock} from 'lucide-react';
+import MoodRecommendations from './mood-recommendations';
 import {after,before,upNext,epLabel,whenText,daysTo,type Up} from '@/lib/progress';
 import {merge,mergeRemoved,type Removed} from '@/lib/library';
 import type {HeInfo,Offer} from '@/lib/justwatch';
@@ -153,6 +154,7 @@ export default function App({canLogin,user,login,logout}:{canLogin:boolean;user:
   </header>
   {status&&!status.tmdb&&<p className="note" role="status">חסר עדיין מפתח TMDB בשרת, אז חיפוש ותאריכי פרקים לא עובדים. ההוראות בהגדרות.</p>}
 
+  {tab==='up'&&<MoodRecommendations items={items} open={open}/>}
   {tab==='up'&&<section className="tabIn" aria-labelledby="h-up">
    <h1 id="h-up">ממשיכים לצפות</h1>
    <p className="sub">{readyCount?readyCount===1?'סדרה אחת מחכה לך':readyCount+' סדרות מחכות לך':ups.length?'אין פרקים חדשים כרגע':''}</p>
