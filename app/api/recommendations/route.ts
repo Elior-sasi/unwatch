@@ -40,8 +40,10 @@ export async function POST(req:NextRequest){
    const r=await tmdb<{results:Raw[]}>('/discover/'+m,params,3600);
    r.results.forEach(x=>add(x,m,0));
   }));
-  const results=[...pool.values()].sort((a,b)=>b._score-a._score).slice(0,18).map(r=>({
-   ...toHit(r,undefined,r._media),
+  const selected=[...pool.values()].sort((a,b)=>b._score-a._score).slice(0,18);
+  const hebrew=await Promise.allSettled(selected.map(r=>tmdb<Raw>('/'+r._media+'/'+r.id,{language:'he-IL'},3600)));
+  const results=selected.map((r,i)=>({
+   ...toHit({...r,overview:hebrew[i].status==='fulfilled'?(hebrew[i] as PromiseFulfilledResult<Raw>).value.overview||r.overview:r.overview},undefined,r._media),
    reason:(()=>{const best=preferred.find(s=>{const match=s.key.match(/^(tv|movie):(\\d+)$/);return !!match&&sources[preferred.indexOf(s)]?.status==='fulfilled'&&(sources[preferred.indexOf(s)] as PromiseFulfilledResult<(Raw&{_media:Media})[]>).value.some(x=>x.id===r.id&&x._media===r._media);});return best?.title?'כי אהבת את '+best.title+' — ויש ביניהם דמיון בסגנון ובתוכן':preferred.length?'מבוסס על כותרים שאהבת בספרייה ועל מצב הרוח שבחרת':'מתאים לסגנון ולמצב הרוח שבחרת';})()
   }));
   return NextResponse.json({results,mood:moods[mood].label});
