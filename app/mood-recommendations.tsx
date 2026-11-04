@@ -2,7 +2,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {Sparkles,RefreshCw} from 'lucide-react';
 import type {Hit,Item} from '@/lib/types';
-const moods=[['happy','😊','משהו משמח'],['excited','🔥','אקשן'],['calm','🌿','רגוע'],['thoughtful','🧩','מחשבה ומסתורין'],['anime','✨','אנימה'],['surprise','🎲','תפתיע אותי'],['sad','😢','עצוב'],['angry','😤','כועס'],['scared','😨','מפחד'],['nostalgic','📼','נוסטלגי'],['tired','😴','בלי כוח'],['dark','🌑','אפל']] as const;
+const moods=[['happy','😊','משהו משמח'],['excited','🔥','אקשן'],['calm','🌿','רגוע'],['thoughtful','🧩','מחשבה ומסתורין'],['anime','✨','אנימה'],['sad','😢','עצוב'],['angry','😤','כועס'],['scared','😨','מפחד'],['nostalgic','📼','נוסטלגי'],['tired','😴','בלי כוח'],['dark','🌑','אפל'],['surprise','🎲','תפתיע אותי']] as const;
 type Suggestion=Hit&{reason:string};
 export default function MoodRecommendations({items,open}:{items:Item[];open:(key:string,hit?:Hit)=>void}){
  const scrollRef=useRef<HTMLDivElement>(null);
