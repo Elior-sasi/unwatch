@@ -15,7 +15,7 @@ export default function MoodRecommendations({items,open}:{items:Item[];open:(key
  const [mood,setMood]=useState<string>('');const [results,setResults]=useState<Suggestion[]>([]);const [loading,setLoading]=useState(false);const [error,setError]=useState('');
  async function load(next:string,refresh=false){setMood(next);setLoading(true);setError('');setCardIndex(0);
   const exclude=refresh?(seenRef.current[next]||[]):[];const page=refresh?(pageRef.current[next]||1)+1:1;
-  try{const r=await fetch('/api/recommendations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mood:next,library:items.map(i=>({key:i.key,rating:i.rating,status:i.status,kind:i.kind,title:i.title})),disliked,exclude,page})})});
+  try{const r=await fetch('/api/recommendations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mood:next,library:items.map(i=>({key:i.key,rating:i.rating,status:i.status,kind:i.kind,title:i.title})),disliked,exclude,page})});
    const data=await r.json();if(!r.ok)throw new Error(data.error||'שגיאה');const incoming=(data.results||[]) as Suggestion[];
    if(refresh&&!incoming.length){setError('אין כרגע המלצות חדשות נוספות למצב הרוח הזה.');return;}
    setResults(incoming);pageRef.current[next]=page;seenRef.current[next]=[...new Set([...(seenRef.current[next]||[]),...incoming.map(x=>x.key)])].slice(-2000);
