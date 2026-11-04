@@ -5,7 +5,7 @@ import type {Hit,Item} from '@/lib/types';
 const moods=[['happy','😊','משהו משמח'],['excited','🔥','אקשן'],['calm','🌿','רגוע'],['thoughtful','🧩','מחשבה ומסתורין'],['anime','✨','אנימה'],['surprise','🎲','תפתיע אותי'],['sad','😢','עצוב'],['angry','😤','כועס'],['scared','😨','מפחד'],['nostalgic','📼','נוסטלגי'],['tired','😴','בלי כוח'],['dark','🌑','אפל']] as const;
 type Suggestion=Hit&{reason:string};
 export default function MoodRecommendations({items,open}:{items:Item[];open:(key:string,hit?:Hit)=>void}){
- const [mood,setMood]=useState<string>('surprise');const [results,setResults]=useState<Suggestion[]>([]);const [loading,setLoading]=useState(false);const [error,setError]=useState('');
+ const [mood,setMood]=useState<string>('');const [results,setResults]=useState<Suggestion[]>([]);const [loading,setLoading]=useState(false);const [error,setError]=useState('');
  async function load(next:string){setMood(next);setLoading(true);setError('');setResults([]);
   try{const r=await fetch('/api/recommendations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mood:next,library:items.map(i=>({key:i.key,rating:i.rating,status:i.status,kind:i.kind}))})});
    const data=await r.json();if(!r.ok)throw new Error(data.error||'שגיאה');setResults(data.results||[]);
@@ -14,7 +14,7 @@ export default function MoodRecommendations({items,open}:{items:Item[];open:(key
  return <section className="set" aria-labelledby="mood-heading" style={{marginTop:20}}>
   <h2 id="mood-heading"><Sparkles size={22} aria-hidden="true"/> מה לראות לפי מצב הרוח?</h2>
 
-  <div className="moodChoices" role="group" aria-label="בחירת מצב רוח" style={{display:'flex',overflowX:'auto',flexWrap:'nowrap',gap:6,margin:'8px 0',paddingBottom:5,scrollbarWidth:'thin'}}>
+  <div className="moodChoices" role="group" dir="rtl" aria-label="בחירת מצב רוח" style={{display:'flex',overflowX:'auto',flexWrap:'nowrap',gap:6,margin:'8px 0',paddingBottom:5,scrollbarWidth:'thin'}}>
    {moods.map(([id,emoji,label])=><button key={id} type="button" className={mood===id?'primary':'ghost'} aria-pressed={mood===id} disabled={loading} onClick={()=>load(id)} style={{flex:'0 0 auto',minHeight:40,padding:'7px 12px',whiteSpace:'nowrap',fontSize:14,borderRadius:999}}>{emoji} {label}</button>)}
   </div>
 
