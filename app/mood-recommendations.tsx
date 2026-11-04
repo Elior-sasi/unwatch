@@ -1,15 +1,18 @@
 'use client';
 import {useEffect,useRef,useState} from 'react';
-import {Sparkles,RefreshCw} from 'lucide-react';
+import {Sparkles,RefreshCw,ThumbsDown,Shuffle} from 'lucide-react';
 import type {Hit,Item} from '@/lib/types';
 const moods=[['happy','😊','משהו משמח'],['excited','🔥','אקשן'],['calm','🌿','רגוע'],['thoughtful','🧩','מחשבה ומסתורין'],['anime','✨','אנימה'],['sad','😢','עצוב'],['angry','😤','כועס'],['scared','😨','מפחד'],['nostalgic','📼','נוסטלגי'],['tired','😴','בלי כוח'],['dark','🌑','אפל'],['surprise','🎲','תפתיע אותי']] as const;
 type Suggestion=Hit&{reason:string};
 export default function MoodRecommendations({items,open}:{items:Item[];open:(key:string,hit?:Hit)=>void}){
  const scrollRef=useRef<HTMLDivElement>(null);
  useEffect(()=>{const el=scrollRef.current;if(!el)return;el.scrollLeft=0;const frame=requestAnimationFrame(()=>{el.scrollLeft=0;});return ()=>cancelAnimationFrame(frame);},[]);
+ const [disliked,setDisliked]=useState<string[]>([]);const [single,setSingle]=useState(false);
+ useEffect(()=>{try{const v=JSON.parse(localStorage.getItem('unwatch:disliked')||'[]');if(Array.isArray(v))setDisliked(v.filter((x:unknown)=>typeof x==='string'));}catch{}},[]);
+ const dismiss=(key:string)=>{const next=[...new Set([...disliked,key])];setDisliked(next);try{localStorage.setItem('unwatch:disliked',JSON.stringify(next));}catch{}setResults(r=>r.filter(x=>x.key!==key));};
  const [mood,setMood]=useState<string>('');const [results,setResults]=useState<Suggestion[]>([]);const [loading,setLoading]=useState(false);const [error,setError]=useState('');
  async function load(next:string){setMood(next);setLoading(true);setError('');setResults([]);
-  try{const r=await fetch('/api/recommendations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mood:next,library:items.map(i=>({key:i.key,rating:i.rating,status:i.status,kind:i.kind}))})});
+  try{const r=await fetch('/api/recommendations',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mood:next,library:items.map(i=>({key:i.key,rating:i.rating,status:i.status,kind:i.kind,title:i.title})),disliked})})});
    const data=await r.json();if(!r.ok)throw new Error(data.error||'שגיאה');setResults(data.results||[]);
   }catch(e){setError(e instanceof Error?e.message:'שגיאה בטעינת המלצות');}finally{setLoading(false);}
  }
@@ -22,12 +25,12 @@ export default function MoodRecommendations({items,open}:{items:Item[];open:(key
 
   {loading&&<p role="status" className="setNote">מחפש המלצות שמתאימות לך…</p>}
   {error&&<p role="alert" className="note">{error}</p>}
-  {!!results.length&&<><button className="ghost" disabled={loading} onClick={()=>load(mood)} style={{padding:'6px 10px',minHeight:34,fontSize:13}}><RefreshCw size={15}/> רענון</button>
+  {!!results.length&&<><div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}><button className="ghost" onClick={()=>setSingle(v=>!v)} style={{padding:'6px 10px',minHeight:34,fontSize:13}}><Shuffle size={15}/>{single?'כל ההמלצות':'תבחר בשבילי'}</button><button className="ghost" disabled={loading} onClick={()=>load(mood)} style={{padding:'6px 10px',minHeight:34,fontSize:13}}><RefreshCw size={15}/> רענון</button></div>
    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(145px,1fr))',gap:12,marginTop:14}}>
-    {results.map(r=><button key={r.key} onClick={()=>open(r.key,r)} className="ghost" style={{display:'flex',flexDirection:'column',alignItems:'stretch',textAlign:'right',padding:8,gap:7}}>
+    {(single?results.slice(0,1):results).map(r=><div key={r.key} className="ghost" style={{display:'flex',flexDirection:'column',alignItems:'stretch',textAlign:'right',padding:8,gap:7}}>
      {r.poster&&<img src={r.poster} alt="" loading="lazy" style={{width:'100%',aspectRatio:'2 / 3',objectFit:'cover',borderRadius:10}}/>}
-     <strong dir="auto">{r.title}</strong><small>{r.year} · {r.kind==='anime'?'אנימה':r.media==='movie'?'סרט':'סדרה'}</small><small>{r.reason}</small>
-    </button>)}
+     <button type="button" onClick={()=>open(r.key,r)} style={{background:'none',border:0,color:'inherit',textAlign:'right',padding:0,font:'inherit',cursor:'pointer'}}><strong dir="auto">{r.title}</strong></button><small>{r.year} · {r.kind==='anime'?'אנימה':r.media==='movie'?'סרט':'סדרה'}</small><small>{r.reason}</small><button type="button" onClick={()=>dismiss(r.key)} className="ghost" style={{padding:6,minHeight:32,fontSize:12,alignSelf:'start'}}><ThumbsDown size={14}/> לא בשבילי</button>
+    </div>)}
    </div></>}
  </section>;
 }
