@@ -2,7 +2,7 @@ import {NextRequest,NextResponse} from 'next/server';
 import {tmdb,toHit} from '@/lib/tmdb';
 import type {Hit,Media} from '@/lib/types';
 export const dynamic='force-dynamic';
-type Seed={key:string;rating?:number|null;status?:string;kind?:string};
+type Seed={key:string;title?:string;rating?:number|null;status?:string;kind?:string};
 type Raw={id:number;title?:string;name?:string;original_title?:string;original_name?:string;release_date?:string;first_air_date?:string;poster_path?:string|null;overview?:string;genre_ids?:number[];original_language?:string;origin_country?:string[];vote_average?:number;vote_count?:number;adult?:boolean};
 const moods:Record<string,{genres:string;label:string}>={happy:{genres:'35,10751,16',label:'קליל ומשמח'},excited:{genres:'28,12,878',label:'אקשן והרפתקאות'},calm:{genres:'18,10749',label:'רגוע ומרגש'},thoughtful:{genres:'9648,18,878',label:'מסתורי ומעורר מחשבה'},anime:{genres:'16,12,14',label:'אנימה ופנטזיה'},surprise:{genres:'12,35,16,18',label:'משהו מפתיע'},sad:{genres:'18,10749',label:'עצוב או מרגש'},angry:{genres:'28,53,80',label:'לפרוק עצבים'},scared:{genres:'27,53,9648',label:'פחד ומתח'},nostalgic:{genres:'16,10751,12',label:'נוסטלגיה'},tired:{genres:'35,16,10751',label:'בלי מאמץ'},dark:{genres:'80,9648,53',label:'אפל וכבד'}};
 export async function POST(req:NextRequest){
@@ -11,6 +11,7 @@ export async function POST(req:NextRequest){
   if(!moods[mood])return NextResponse.json({error:'מצב רוח לא תקין'},{status:400});
   const seeds:Seed[]=Array.isArray(body.library)?body.library.filter((x:unknown)=>x&&typeof x==='object').slice(0,100):[];
   const existing=new Set(seeds.map(s=>s.key));
+  const disliked=new Set(Array.isArray(body.disliked)?body.disliked.filter((k:unknown)=>typeof k==='string').slice(0,1000):[]);
   const preferred=seeds.filter(s=>s.rating==null||s.rating>=6).sort((a,b)=>(b.rating||0)-(a.rating||0)).slice(0,8);
   const sources=await Promise.allSettled(preferred.map(async s=>{
    const m=/^(tv|movie):(\d+)$/.exec(s.key||'');if(!m)return [] as Raw[];
@@ -21,7 +22,7 @@ export async function POST(req:NextRequest){
   const pool=new Map<string,Candidate>();
   const add=(r:Raw,media:Media,bonus:number)=>{
    if(!r?.id||r.adult||!r.poster_path)return;
-   const key=media+':'+r.id;if(existing.has(key))return;
+   const key=media+':'+r.id;if(existing.has(key)||disliked.has(key))return;
    const genres=r.genre_ids||[];
    const wanted=moods[mood].genres.split(',').map(Number);
    const match=genres.filter(g=>wanted.includes(g)).length;
@@ -39,7 +40,7 @@ export async function POST(req:NextRequest){
   }));
   const results=[...pool.values()].sort((a,b)=>b._score-a._score).slice(0,18).map(r=>({
    ...toHit(r,undefined,r._media),
-   reason:preferred.length?'מתאים למצב הרוח שלך ולהעדפות מהספרייה':'מתאים למצב הרוח שבחרת'
+   reason:(()=>{const best=preferred.find(s=>{const match=s.key.match(/^(tv|movie):(\\d+)$/);return !!match&&sources[preferred.indexOf(s)]?.status==='fulfilled'&&(sources[preferred.indexOf(s)] as PromiseFulfilledResult<(Raw&{_media:Media})[]>).value.some(x=>x.id===r.id&&x._media===r._media);});return best?.title?'כי אהבת את '+best.title+' — ויש ביניהם דמיון בסגנון ובתוכן':preferred.length?'מבוסס על כותרים שאהבת בספרייה ועל מצב הרוח שבחרת':'מתאים לסגנון ולמצב הרוח שבחרת';})()
   }));
   return NextResponse.json({results,mood:moods[mood].label});
  }catch{return NextResponse.json({error:'לא ניתן לטעון המלצות כרגע'},{status:500});}
